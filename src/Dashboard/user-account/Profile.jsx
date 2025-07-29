@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { useEffect, useState, useContext } from "react";
 import uploadImageToCloudinary from "../../utils/uploadCloudinary";
-import { BASE_URL, token } from "../../config";
+import { getDatabase, ref, get, set } from "firebase/database";
 import { toast } from "react-toastify";
 import HashLoader from "react-spinners/HashLoader";
 import { authContext } from "../../context/AuthContext";
@@ -13,6 +13,8 @@ const Profile = () => {
   const [previewURL, setPreviewURL] = useState("");
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [firebaseKey, setFirebaseKey] = useState(null);
+
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -20,7 +22,7 @@ const Profile = () => {
     photo: null,
     gender: "",
     bloodType: "",
-    phoneNumber: "", // Added phone number field
+    phoneNumber: "",
   });
   const navigate = useNavigate();
 
@@ -28,54 +30,86 @@ const Profile = () => {
     const fetchPatientData = async () => {
       if (!userId || userId === "null" || userId === "") {
         console.warn("userId missing:", { user, userId });
-        toast.error("Please log in to view your profile", {
-          position: "top-right",
-          autoClose: 3000,
-          hideProgressBar: false,
-          closeOnClick: true,
-          pauseOnHover: true,
-          draggable: true,
-        });
+        toast.error("Please log in to view your profile");
+        navigate("/login");
         return;
       }
 
       try {
-        const res = await fetch(`${BASE_URL}/users/${userId}`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          throw new Error(data.message || "Failed to fetch patient data");
+        const db = getDatabase();
+        const usersRef = ref(db, `users`);
+        const usersSnapshot = await get(usersRef);
+
+        if (!usersSnapshot.exists()) {
+          console.warn("Users data node not found in Firebase.");
+          toast.warn("User data not found. Please contact support.");
+          setFormData({
+            name: "Unknown User",
+            email: "no-email@example.com",
+            password: "",
+            photo: null,
+            gender: "",
+            bloodType: "",
+            phoneNumber: "",
+          });
+          setPreviewURL("");
+          return;
+        }
+
+        const allUsersData = usersSnapshot.val();
+        let foundUser = null;
+        let foundFirebaseKey = null;
+
+        for (const key in allUsersData) {
+          if (allUsersData.hasOwnProperty(key)) {
+            const currentUserData = allUsersData[key];
+            if (currentUserData.id === userId) {
+              foundUser = currentUserData;
+              foundFirebaseKey = key;
+              break;
+            }
+          }
+        }
+
+        if (!foundUser) {
+          console.warn("User data not found for userId:", userId);
+          toast.warn("User data not found. Please contact support.");
+          setFormData({
+            name: "Unknown User",
+            email: "no-email@example.com",
+            password: "",
+            photo: null,
+            gender: "",
+            bloodType: "",
+            phoneNumber: "",
+          });
+          setPreviewURL("");
+          return;
         }
 
         setFormData({
-          name: data.name || "",
-          email: data.email || "",
-          password: data.password || "",
-          photo: data.photo || null,
-          gender: data.gender || "",
-          bloodType: data.bloodType || "",
-          phoneNumber: data.phoneNumber || "", // Added phone number
+          name: foundUser.name || "",
+          email: foundUser.email || "",
+          password: foundUser.password || "",
+          photo: foundUser.photo || null,
+          gender: foundUser.gender || "",
+          bloodType: foundUser.bloodType || "",
+          phoneNumber: foundUser.phoneNumber || "",
         });
-        setPreviewURL(data.photo || "");
+        setPreviewURL(foundUser.photo || "");
+        setFirebaseKey(foundFirebaseKey);
       } catch (error) {
         console.error("Error fetching patient data:", error);
-        toast.error("Failed to load patient data: " + error.message, {
-          position: "top-right",
-          autoClose: 3000,
-          hideProgressBar: false,
-          closeOnClick: true,
-          pauseOnHover: true,
-          draggable: true,
-        });
+        toast.error(
+          error.message === "Permission denied"
+            ? "Please log in to view your profile."
+            : "Failed to load patient data: " + error.message
+        );
       }
     };
 
     fetchPatientData();
-  }, [userId]);
-
+  }, [userId, navigate]);
   const handleInputChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
@@ -85,14 +119,7 @@ const Profile = () => {
     if (!file) return;
 
     if (!["image/jpeg", "image/png"].includes(file.type)) {
-      toast.error("Please upload a JPG or PNG image", {
-        position: "top-right",
-        autoClose: 3000,
-        hideProgressBar: false,
-        closeOnClick: true,
-        pauseOnHover: true,
-        draggable: true,
-      });
+      toast.error("Please upload a JPG or PNG image");
       return;
     }
 
@@ -103,7 +130,6 @@ const Profile = () => {
 
     try {
       const data = await uploadImageToCloudinary(file);
-
       const imageUrl = typeof data === "string" ? data : data.url;
       if (!imageUrl) {
         throw new Error("Invalid Cloudinary response: URL missing");
@@ -113,24 +139,10 @@ const Profile = () => {
         photo: imageUrl,
       }));
       setPreviewURL(imageUrl);
-      toast.success("Photo uploaded successfully", {
-        position: "top-right",
-        autoClose: 3000,
-        hideProgressBar: false,
-        closeOnClick: true,
-        pauseOnHover: true,
-        draggable: true,
-      });
+      toast.success("Photo uploaded successfully");
     } catch (error) {
       console.error("Error uploading photo:", error);
-      toast.error("Failed to upload photo: " + error.message, {
-        position: "top-right",
-        autoClose: 3000,
-        hideProgressBar: false,
-        closeOnClick: true,
-        pauseOnHover: true,
-        draggable: true,
-      });
+      toast.error("Failed to upload photo: " + error.message);
       setPreviewURL(formData.photo || "");
       setSelectedFile(null);
     } finally {
@@ -142,26 +154,33 @@ const Profile = () => {
     event.preventDefault();
     setLoading(true);
 
+    if (!firebaseKey) {
+      toast.error("Cannot update profile: User key not found.");
+      setLoading(false);
+      return;
+    }
+
     try {
-      const resCurrent = await fetch(`${BASE_URL}/users/${userId}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-      const currentData = await resCurrent.json();
-      if (!resCurrent.ok) {
-        throw new Error(currentData.message || "Failed to fetch current data");
+      const db = getDatabase();
+      const userRef = ref(db, `users/${firebaseKey}`);
+      const userSnapshot = await get(userRef);
+
+      if (!userSnapshot.exists()) {
+        throw new Error(
+          "User data not found for update (might have been deleted)"
+        );
       }
 
+      const currentData = userSnapshot.val();
       const payload = { ...currentData };
-
       if (formData.name && formData.name.trim() !== currentData.name) {
         payload.name = formData.name.trim();
       }
-      if (formData.email && formData.email.trim() !== currentData.email) {
-        payload.email = formData.email.trim();
-      }
-      if (formData.password && formData.password.trim()) {
+
+      if (
+        formData.password &&
+        formData.password.trim() !== currentData.password
+      ) {
         payload.password = formData.password.trim();
       }
       if (formData.photo && formData.photo !== currentData.photo) {
@@ -183,61 +202,34 @@ const Profile = () => {
         payload.phoneNumber = formData.phoneNumber.trim();
       }
 
-      // Check if there are any changes
-      const hasChanges = !Object.keys(payload).every(
-        (key) => payload[key] === currentData[key]
+      payload.id = currentData.id;
+      payload.role = currentData.role;
+
+      const hasChanges = Object.keys(payload).some(
+        (key) => payload[key] !== currentData[key]
       );
 
       if (!hasChanges) {
-        toast.info("No changes detected in your profile", {
-          position: "top-right",
-          autoClose: 3000,
-          hideProgressBar: false,
-          closeOnClick: true,
-          pauseOnHover: true,
-          draggable: true,
-        });
+        toast.info("No changes detected in your profile");
         setLoading(false);
         return;
       }
 
-      const res = await fetch(`${BASE_URL}/users/${userId}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(payload),
-      });
+      await set(userRef, payload);
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.message || "Failed to update profile");
-      }
-
-      toast.success("Profile updated successfully!", {
-        position: "top-right",
-        autoClose: 3000,
-        hideProgressBar: false,
-        closeOnClick: true,
-        pauseOnHover: true,
-        draggable: true,
-      });
-      navigate("/users/profile/me");
+      toast.success("Profile updated successfully!");
     } catch (error) {
       console.error("Error updating profile:", error);
-      toast.error(error.message || "Failed to update profile", {
-        position: "top-right",
-        autoClose: 3000,
-        hideProgressBar: false,
-        closeOnClick: true,
-        pauseOnHover: true,
-        draggable: true,
-      });
+      toast.error(
+        error.message === "Permission denied"
+          ? "Permission denied. Please check Firebase Rules or re-authenticate."
+          : "Failed to update profile: " + error.message
+      );
     } finally {
       setLoading(false);
     }
   };
+
   const togglePasswordVisibility = () => {
     setShowPassword(!showPassword);
   };
@@ -253,8 +245,7 @@ const Profile = () => {
             value={formData.name}
             onChange={handleInputChange}
             required
-            className="w-full pr-4 px-4 py-3 border-b border-solid border-[#0066ff61] focus:outline-none text-[16px] leading-7
-            focus:border-b-primaryColor text-headingColor placeholder:text-textColor rounded-md cursor-pointer"
+            className="w-full pr-4 px-4 py-3 border-b border-solid border-[#0066ff61] focus:outline-none text-[16px] leading-7 focus:border-b-primaryColor text-headingColor placeholder:text-textColor rounded-md cursor-pointer"
           />
         </div>
 
@@ -265,8 +256,7 @@ const Profile = () => {
             placeholder="Enter your Email"
             value={formData.email}
             readOnly
-            className="w-full pr-4 px-4 py-3 border-b border-solid border-[#0066ff61] focus:outline-none text-[16px] leading-7
-            focus:border-b-primaryColor text-headingColor placeholder:text-textColor rounded-md cursor-not-allowed"
+            className="w-full pr-4 px-4 py-3 border-b border-solid border-[#0066ff61] focus:outline-none text-[16px] leading-7 focus:border-b-primaryColor text-headingColor placeholder:text-textColor rounded-md cursor-not-allowed"
           />
         </div>
 
@@ -277,8 +267,7 @@ const Profile = () => {
             placeholder="Password"
             value={formData.password}
             onChange={handleInputChange}
-            className="w-full pr-10 px-4 py-3 border-b border-solid border-[#0066ff61] focus:outline-none text-[16px] leading-7
-            focus:border-b-primaryColor text-headingColor placeholder:text-textColor rounded-md cursor-pointer"
+            className="w-full pr-10 px-4 py-3 border-b border-solid border-[#0066ff61] focus:outline-none text-[16px] leading-7 focus:border-b-primaryColor text-headingColor placeholder:text-textColor rounded-md cursor-pointer"
           />
           <button
             type="button"
@@ -296,8 +285,7 @@ const Profile = () => {
             placeholder="Phone Number"
             value={formData.phoneNumber}
             onChange={handleInputChange}
-            className="w-full pr-4 px-4 py-3 border-b border-solid border-[#0066ff61] focus:outline-none text-[16px] leading-7
-            focus:border-b-primaryColor text-headingColor placeholder:text-textColor rounded-md cursor-pointer"
+            className="w-full pr-4 px-4 py-3 border-b border-solid border-[#0066ff61] focus:outline-none text-[16px] leading-7 focus:border-b-primaryColor text-headingColor placeholder:text-textColor rounded-md cursor-pointer"
           />
         </div>
 
@@ -308,8 +296,7 @@ const Profile = () => {
             placeholder="Blood Type"
             value={formData.bloodType}
             onChange={handleInputChange}
-            className="w-full pr-4 px-4 py-3 border-b border-solid border-[#0066ff61] focus:outline-none text-[16px] leading-7
-            focus:border-b-primaryColor text-headingColor placeholder:text-textColor rounded-md cursor-pointer"
+            className="w-full pr-4 px-4 py-3 border-b border-solid border-[#0066ff61] focus:outline-none text-[16px] leading-7 focus:border-b-primaryColor text-headingColor placeholder:text-textColor rounded-md cursor-pointer"
           />
         </div>
 
@@ -351,8 +338,7 @@ const Profile = () => {
             />
             <label
               htmlFor="customFile"
-              className="absolute top-0 left-0 w-full h-full flex items-center px-[0.75rem] py-[0.375rem] text-[15px] leading-6 
-              overflow-hidden text-headingColor bg-[#0066ff46] font-semibold rounded-lg truncate cursor-pointer"
+              className="absolute top-0 left-0 w-full h-full flex items-center px-[0.75rem] py-[0.375rem] text-[15px] leading-6 overflow-hidden text-headingColor bg-[#0066ff46] font-semibold rounded-lg truncate cursor-pointer"
             >
               {loading ? (
                 <HashLoader size={25} color="#0066ff" />

@@ -1,25 +1,31 @@
 import React, { useEffect, useState } from "react";
 import ServiceCard from "./ServiceCard";
-import { BASE_URL } from "../../config";
+import { ref, onValue } from "firebase/database";
+import { db } from "../../../firebase/config";
 
 const ServiceList = () => {
   const [services, setServices] = useState([]);
 
   useEffect(() => {
-    const fetchServices = async () => {
-      try {
-        const res = await fetch(`${BASE_URL}/services`);
-        if (!res.ok) {
-          throw new Error(`Failed to fetch services: ${res.statusText}`);
+    const servicesRef = ref(db, "services");
+    onValue(
+      servicesRef,
+      (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+          const servicesArray = Object.keys(data).map((key) => ({
+            id: key,
+            ...data[key],
+          }));
+          setServices(servicesArray);
+        } else {
+          setServices([]);
         }
-        const data = await res.json();
-        setServices(data);
-      } catch (err) {
-        console.error("Failed to fetch services:", err);
+      },
+      (error) => {
+        console.error("Failed to fetch services:", error);
       }
-    };
-
-    fetchServices();
+    );
   }, []);
 
   return (

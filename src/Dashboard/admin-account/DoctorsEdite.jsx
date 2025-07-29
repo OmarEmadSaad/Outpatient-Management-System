@@ -1,27 +1,50 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
-import { doctor_URL } from "../../config";
+import { BASE_URL, token } from "../../config";
 import Swal from "sweetalert2";
+
+const DOCTORS_API_URL = `${BASE_URL}/doctors`;
 
 const DoctorsEdite = () => {
   const [doctors, setDoctors] = useState([]);
 
+  const fetchDoctors = async () => {
+    try {
+      const response = await axios.get(`${DOCTORS_API_URL}.json`);
+      const data = response.data;
+
+      const fetchedDoctors = [];
+      for (const key in data) {
+        if (Object.prototype.hasOwnProperty.call(data, key)) {
+          fetchedDoctors.push({
+            firebaseKey: key,
+            id: data[key].id,
+            ...data[key],
+          });
+        }
+      }
+      setDoctors(fetchedDoctors);
+    } catch (err) {
+      console.error("Error fetching doctors:", err);
+      Swal.fire({
+        title: "Error!",
+        text: `Failed to load doctors: ${err.message}`,
+        icon: "error",
+        confirmButtonColor: "#3085d6",
+      });
+    }
+  };
+
   useEffect(() => {
-    axios
-      .get(doctor_URL)
-      .then((res) => {
-        setDoctors(res.data);
-      })
-      .catch((err) => console.error("Error fetching doctors:", err));
+    fetchDoctors();
   }, []);
 
-  const handleDelete = async (event, id, name) => {
+  const handleDelete = async (event, firebaseKey, name) => {
     event.preventDefault();
-    console.log(`Initiating delete for doctor: ${name} (ID: ${id})`);
 
     const result = await Swal.fire({
       title: "Confirm Deletion",
-      text: `Are you sure you want to delete ${name}?`,
+      text: `Are you sure you want to delete ${name}? This action cannot be undone.`,
       icon: "warning",
       showCancelButton: true,
       confirmButtonColor: "#d33",
@@ -33,22 +56,22 @@ const DoctorsEdite = () => {
     });
 
     if (!result.isConfirmed) {
-      console.log("Deletion cancelled for doctor:", name);
       return;
     }
 
     try {
-      console.log(`Deleting doctor ${id} from ${doctor_URL}/${id}...`);
-      const response = await axios.delete(`${doctor_URL}/${id}`);
-      console.log("Delete response status:", response.status);
-
-      if (response.status >= 300 && response.status < 400) {
-        console.warn("Redirect detected in DELETE request:", response.status);
-        throw new Error("Unexpected redirect from server");
+      if (!token) {
+        throw new Error("Please log in to delete doctors.");
       }
 
-      setDoctors((prev) => prev.filter((doctor) => doctor.id !== id));
-      console.log(`Doctor ${name} deleted successfully.`);
+      const response = await axios.delete(
+        `${DOCTORS_API_URL}/${firebaseKey}.json?auth=${token}`
+      );
+
+      setDoctors((prev) =>
+        prev.filter((doctor) => doctor.firebaseKey !== firebaseKey)
+      );
+
       Swal.fire({
         title: "Deleted!",
         text: `${name} has been deleted.`,
@@ -68,40 +91,70 @@ const DoctorsEdite = () => {
   };
 
   return (
-    <div className="p-6">
-      <h1 className="text-3xl font-bold mb-4 text-blue-400">
+    <div className="p-6 bg-gray-50 min-h-screen">
+      <h1 className="text-3xl font-bold mb-6 text-blue-600 text-center">
         Doctors Management
       </h1>
-      <div className="overflow-x-auto">
-        <table className="min-w-full bg-white border border-gray-200">
+      <div className="overflow-x-auto shadow-lg rounded-lg">
+        <table className="min-w-full bg-white border border-gray-200 rounded-lg">
           <thead>
-            <tr className="bg-gray-100 text-left">
-              <th className="py-2 px-4 border-b">ID</th>
-              <th className="py-2 px-4 border-b">Photo</th>
-              <th className="py-2 px-4 border-b">Name</th>
-              <th className="py-2 px-4 border-b">Email</th>
-              <th className="py-2 px-4 border-b">Gender</th>
-              <th className="py-2 px-4 border-b">Action</th>
+            <tr className="bg-blue-100 text-left text-blue-800">
+              <th className="py-3 px-4 border-b border-gray-200 font-semibold text-sm">
+                ID
+              </th>
+              <th className="py-3 px-4 border-b border-gray-200 font-semibold text-sm">
+                Photo
+              </th>
+              <th className="py-3 px-4 border-b border-gray-200 font-semibold text-sm">
+                Name
+              </th>
+              <th className="py-3 px-4 border-b border-gray-200 font-semibold text-sm">
+                Email
+              </th>
+              <th className="py-3 px-4 border-b border-gray-200 font-semibold text-sm">
+                Gender
+              </th>
+              <th className="py-3 px-4 border-b border-gray-200 font-semibold text-sm">
+                Action
+              </th>
             </tr>
           </thead>
           <tbody>
             {doctors.map((doctor) => (
-              <tr key={doctor.id} className="hover:bg-gray-50">
-                <td className="py-2 px-4 border-b">{doctor.id}</td>
-                <td className="py-2 px-4 border-b">
+              <tr
+                key={doctor.firebaseKey}
+                className="hover:bg-gray-100 transition-colors duration-200 ease-in-out"
+              >
+                <td className="py-3 px-4 border-b border-gray-200 text-sm text-gray-700">
+                  {doctor.id}
+                </td>
+                <td className="py-3 px-4 border-b border-gray-200 text-sm text-gray-700">
                   <img
                     src={doctor.photo}
                     alt={doctor.name}
-                    className="w-12 h-12 rounded-full object-cover"
+                    className="w-12 h-12 rounded-full object-cover border-2 border-blue-300"
+                    onError={(e) => {
+                      e.target.onerror = null;
+                      e.target.src =
+                        "https://placehold.co/48x48/cccccc/000000?text=No+Img";
+                    }}
                   />
                 </td>
-                <td className="py-2 px-4 border-b">{doctor.name}</td>
-                <td className="py-2 px-4 border-b">{doctor.email}</td>
-                <td className="py-2 px-4 border-b">{doctor.gender || "N/A"}</td>
-                <td className="py-2 px-4 border-b">
+                <td className="py-3 px-4 border-b border-gray-200 text-sm text-gray-700">
+                  {doctor.name}
+                </td>
+                <td className="py-3 px-4 border-b border-gray-200 text-sm text-gray-700">
+                  {doctor.email}
+                </td>
+                <td className="py-3 px-4 border-b border-gray-200 text-sm text-gray-700 capitalize">
+                  {doctor.gender || "N/A"}
+                </td>
+                <td className="py-3 px-4 border-b border-gray-200 text-sm">
                   <button
-                    onClick={(e) => handleDelete(e, doctor.id, doctor.name)}
-                    className="text-white bg-red-500 hover:bg-red-600 px-3 py-1 rounded hover:cursor-pointer"
+                    onClick={(e) =>
+                      handleDelete(e, doctor.firebaseKey, doctor.name)
+                    }
+                    className="text-white bg-red-600 hover:bg-red-700 px-4 py-2 rounded-md text-sm font-medium transition-colors duration-200 ease-in-out shadow-md hover:shadow-lg"
                   >
                     Delete
                   </button>
@@ -110,7 +163,10 @@ const DoctorsEdite = () => {
             ))}
             {doctors.length === 0 && (
               <tr>
-                <td colSpan="6" className="text-center py-4 text-gray-500">
+                <td
+                  colSpan="6"
+                  className="text-center py-6 text-gray-500 text-lg"
+                >
                   No doctors found.
                 </td>
               </tr>

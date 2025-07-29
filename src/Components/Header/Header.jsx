@@ -38,18 +38,21 @@ function Header() {
       return;
     }
 
-    let endpoint;
+    let baseUrl;
     if (role === "doctor") {
-      endpoint = `${doctor_URL}/${storedUserId}`;
+      baseUrl = doctor_URL.replace(".json", "");
     } else if (role === "admin") {
-      endpoint = `${admin_URL}/${storedUserId}`;
+      baseUrl = admin_URL.replace(".json", "");
     } else {
-      endpoint = `${User_URL}/${storedUserId}`;
+      baseUrl = User_URL.replace(".json", "");
     }
+
+    const endpoint = `${baseUrl}/${storedUserId}.json`;
 
     try {
       const res = await fetch(endpoint);
       if (!res.ok) {
+        console.error("Request failed:", res.status);
         setFetchedUser(null);
         return;
       }
@@ -106,7 +109,7 @@ function Header() {
   };
 
   const handleAddDoctor = () => {
-    navigate("/register"); // Adjust the route as needed
+    navigate("/register");
   };
 
   const toggleMenu = () => menuRef.current.classList.toggle("show__menu");
@@ -145,7 +148,7 @@ function Header() {
               {isLoggedIn && localStorage.getItem("role") === "admin" && (
                 <li className="md:hidden">
                   <button
-                    onClick={handleAddDoctor} // Updated to use handleAddDoctor
+                    onClick={handleAddDoctor}
                     className="bg-green-600 py-2 px-4 text-white font-[600] h-[44px] flex items-center justify-center rounded-[50px] cursor-pointer w-full"
                   >
                     Add Doctor

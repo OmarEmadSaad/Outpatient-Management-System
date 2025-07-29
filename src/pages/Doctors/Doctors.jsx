@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import UseFetchDate from "../../hooks/UseFetchDate";
-import { BASE_URL } from "../../config";
+import { ref, onValue } from "firebase/database";
+import { db } from "../../../firebase/config";
 import Loader from "../../Components/Loader/Loading";
 import Error from "../../Components/Error/Error";
 import Testimonial from "../../Components/Testimonial/Testimonial";
@@ -12,17 +12,67 @@ import { FaStar, FaStarHalfAlt, FaRegStar } from "react-icons/fa";
 const Doctors = () => {
   const [query, setQuery] = useState("");
   const [filteredDoctors, setFilteredDoctors] = useState([]);
-  const {
-    data: doctors,
-    loading: doctorsLoading,
-    error: doctorsError,
-  } = UseFetchDate(`${BASE_URL}/doctors`);
-  const {
-    data: reviews,
-    loading: reviewsLoading,
-    error: reviewsError,
-  } = UseFetchDate(`${BASE_URL}/reviews`);
+  const [doctors, setDoctors] = useState([]);
+  const [reviews, setReviews] = useState([]);
+  const [doctorsLoading, setDoctorsLoading] = useState(false);
+  const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [doctorsError, setDoctorsError] = useState(null);
+  const [reviewsError, setReviewsError] = useState(null);
   const navigate = useNavigate();
+
+  // جلب بيانات الأطباء من Firebase
+  useEffect(() => {
+    setDoctorsLoading(true);
+    const doctorsRef = ref(db, "doctors");
+    onValue(
+      doctorsRef,
+      (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+          const doctorsArray = Object.keys(data).map((key) => ({
+            id: key,
+            ...data[key],
+          }));
+          setDoctors(doctorsArray);
+        } else {
+          setDoctors([]);
+        }
+        setDoctorsLoading(false);
+      },
+      (err) => {
+        setDoctorsError(err.message);
+        setDoctorsLoading(false);
+        console.error("Error fetching doctors:", err);
+      }
+    );
+  }, []);
+
+  // جلب بيانات التقييمات من Firebase
+  useEffect(() => {
+    setReviewsLoading(true);
+    const reviewsRef = ref(db, "reviews");
+    onValue(
+      reviewsRef,
+      (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+          const reviewsArray = Object.keys(data).map((key) => ({
+            id: key,
+            ...data[key],
+          }));
+          setReviews(reviewsArray);
+        } else {
+          setReviews([]);
+        }
+        setReviewsLoading(false);
+      },
+      (err) => {
+        setReviewsError(err.message);
+        setReviewsLoading(false);
+        console.error("Error fetching reviews:", err);
+      }
+    );
+  }, []);
 
   const calculateAvgRating = (doctorId, reviews) => {
     const doctorReviews = reviews.filter(
@@ -39,7 +89,8 @@ const Doctors = () => {
   const renderStars = (rating) => {
     const stars = [];
     const maxStars = 5;
-    const normalizedRating = rating && !isNaN(rating) ? rating : 0;
+    // تحويل التقييم من نطاق 0-10 إلى 0-5 لعرض النجوم
+    const normalizedRating = rating && !isNaN(rating) ? rating / 2 : 0;
     const fullStars = Math.floor(normalizedRating);
     const hasHalfStar = normalizedRating % 1 >= 0.5;
 
@@ -89,8 +140,8 @@ const Doctors = () => {
         ).length;
         return {
           ...doctor,
-          avgRating: avgRating !== null ? avgRating : doctor.avgRating,
-          totalRating: totalRating || 0,
+          avgRating: avgRating !== null ? avgRating : doctor.avgRating || 0,
+          totalRating: totalRating || doctor.totalRating || 0,
         };
       });
 
@@ -163,7 +214,7 @@ const Doctors = () => {
               className="py-4 pl-4 pr-2 bg-transparent w-full cursor-pointer focus:outline-none placeholder:text-textColor"
             />
             <button
-              className="btn btn-info mt-[0px] bg-primaryColor text-white"
+              className="bg-primaryColor text-white font-[600] h-[44px] px-6 rounded-[50px]"
               onClick={() => setQuery(query.trim())}
             >
               Search
@@ -210,7 +261,7 @@ const Doctors = () => {
                         </div>
                         <div className="card-actions">
                           <button
-                            className="btn btn-primary"
+                            className="bg-primaryColor text-white font-[600] h-[44px] px-6 rounded-[50px]"
                             onClick={() => handleBooking(doctor.id)}
                             onTouchEnd={() => handleBooking(doctor.id)}
                           >

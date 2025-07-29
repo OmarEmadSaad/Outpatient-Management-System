@@ -3,10 +3,10 @@ import starIcon from "../../assets/images/Star.png";
 import DoctorAbout from "./DoctorAbout";
 import Feedback from "./Feedback";
 import Sidepanel from "./Sidepanel";
-import { doctor_URL, User_URL, BASE_URL } from "../../config";
 import Loader from "../../Components/Loader/Loading";
-import Error from "../../Components/Error/Error";
+import ErrorComponent from "../../Components/Error/Error";
 import { useParams } from "react-router-dom";
+import { getDatabase, ref, get } from "firebase/database";
 
 const useFetchDoctorAndReviews = (doctorId) => {
   const [data, setData] = useState({ doctor: null, reviews: [], users: [] });
@@ -15,24 +15,55 @@ const useFetchDoctorAndReviews = (doctorId) => {
 
   useEffect(() => {
     const fetchData = async () => {
+      if (!doctorId) {
+        setError("Doctor ID is missing");
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
       try {
-        const doctorRes = await fetch(`${doctor_URL}/${doctorId}`);
-        if (!doctorRes.ok) throw new Error("Failed to fetch doctor data");
-        const doctorData = await doctorRes.json();
+        const db = getDatabase();
 
-        const reviewsRes = await fetch(`${BASE_URL}/reviews`);
-        if (!reviewsRes.ok) throw new Error("Failed to fetch reviews");
-        const reviewsData = await reviewsRes.json();
+        const doctorsRef = ref(db, `doctors`);
+        const doctorsSnapshot = await get(doctorsRef);
 
-        const usersRes = await fetch(`${User_URL}`);
-        if (!usersRes.ok) throw new Error("Failed to fetch users");
-        const usersData = await usersRes.json();
+        let doctorData = null;
+        if (doctorsSnapshot.exists()) {
+          const doctors = doctorsSnapshot.val();
+          doctorData = Object.values(doctors).find(
+            (doc) => doc.id === doctorId
+          );
+          if (!doctorData) {
+            console.error("Doctor not found for ID:", doctorId);
+            throw new Error("Doctor data not found");
+          }
+        } else {
+          console.error("No doctors found in database");
+          throw new Error("Doctor data not found");
+        }
 
-        setData({ doctor: doctorData, reviews: reviewsData, users: usersData });
+        const reviewsRef = ref(db, `reviews`);
+        const reviewsSnapshot = await get(reviewsRef);
+        const reviewsData = reviewsSnapshot.exists()
+          ? Object.values(reviewsSnapshot.val() || {})
+          : [];
+
+        const usersRef = ref(db, `users`);
+        const usersSnapshot = await get(usersRef);
+        const usersData = usersSnapshot.exists()
+          ? Object.values(usersSnapshot.val() || {})
+          : [];
+
+        setData({
+          doctor: doctorData,
+          reviews: reviewsData,
+          users: usersData,
+        });
         setLoading(false);
       } catch (err) {
-        setError(err.message);
+        console.error("Error fetching data:", err);
+        setError(err.message || "Failed to fetch data");
         setLoading(false);
       }
     };
@@ -76,8 +107,8 @@ const DoctorDetails = () => {
     <section>
       <div className="max-w-[1170px] px-5 mx-auto">
         {loading && <Loader />}
-        {error && <Error errMessage={error} />}
-        {!loading && !error && (
+        {error && !data.doctor && <ErrorComponent errMessage={error} />}
+        {!loading && data.doctor && (
           <div className="grid md:grid-cols-3 gap-[50px]">
             <div className="md:col-span-2">
               <div className="flex items-center gap-5">
@@ -157,6 +188,8 @@ const DoctorDetails = () => {
                 doctorId={id}
                 ticketPrice={ticketPrice}
                 timeSlots={timeSlots}
+                doctorName={name}
+                doctorPhoto={photo}
               />
             </div>
           </div>

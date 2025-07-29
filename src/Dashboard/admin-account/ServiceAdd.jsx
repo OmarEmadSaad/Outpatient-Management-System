@@ -2,13 +2,14 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import Swal from "sweetalert2";
-import { service_URL, token } from "../../config";
+import { BASE_URL, token } from "../../config";
 import uploadImageToCloudinary from "../../utils/uploadCloudinary";
 
 const ServiceAdd = () => {
   const navigate = useNavigate();
   const [formData, setFormData] = useState({ name: "", desc: "", image: "" });
   const [newImage, setNewImage] = useState(null);
+  const [uploading, setUploading] = useState(false);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -17,31 +18,41 @@ const ServiceAdd = () => {
 
   const handleImageChange = async (e) => {
     const file = e.target.files[0];
-    if (file) {
-      try {
-        const imageUrl = await uploadImageToCloudinary(file);
-        setNewImage(imageUrl);
-        setFormData((prev) => ({ ...prev, image: imageUrl }));
-      } catch (error) {
-        console.error("Image upload error:", error);
-        Swal.fire({
-          title: "Error!",
-          text: "Failed to upload image to Cloudinary.",
-          icon: "error",
-          confirmButtonColor: "#3085d6",
-          confirmButtonText: "OK",
-        });
+    if (!file) {
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const imageUrl = await uploadImageToCloudinary(file);
+      if (!imageUrl) {
+        throw new Error("Cloudinary returned no image URL");
       }
+      setNewImage(imageUrl);
+      setFormData((prev) => {
+        return { ...prev, image: imageUrl };
+      });
+    } catch (error) {
+      console.error("Image upload error:", error);
+      Swal.fire({
+        title: "Error!",
+        text: `Failed to upload image to Cloudinary: ${error.message}`,
+        icon: "error",
+        confirmButtonColor: "#3085d6",
+        confirmButtonText: "OK",
+      });
+    } finally {
+      setUploading(false);
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    if (!formData.name || !formData.desc || !formData.image) {
+    if (uploading) {
       Swal.fire({
         title: "Error!",
-        text: "Please fill in all fields.",
+        text: "Image is still uploading. Please wait.",
         icon: "error",
         confirmButtonColor: "#3085d6",
         confirmButtonText: "OK",
@@ -49,17 +60,48 @@ const ServiceAdd = () => {
       return;
     }
 
+    if (!formData.name.trim() || !formData.desc.trim() || !formData.image) {
+      Swal.fire({
+        title: "Error!",
+        text: `Please fill in all fields. Missing: ${
+          !formData.name.trim() ? "Name, " : ""
+        }${!formData.desc.trim() ? "Description, " : ""}${
+          !formData.image ? "Image" : ""
+        }`,
+        icon: "error",
+        confirmButtonColor: "#3085d6",
+        confirmButtonText: "OK",
+      });
+      return;
+    }
+
+    if (!token) {
+      Swal.fire({
+        title: "Error!",
+        text: "Please log in to add services.",
+        icon: "error",
+        confirmButtonColor: "#3085d6",
+        confirmButtonText: "OK",
+      }).then(() => navigate("/login"));
+      return;
+    }
+
+    const internalId = `srv${Date.now()}`;
     const serviceData = {
       ...formData,
+      id: internalId,
       bgColor: "rgba(75, 192, 192, .2)",
       textColor: "#4BC0C0",
     };
 
     try {
-      console.log(`Creating new service at: ${service_URL}`);
-      const response = await axios.post(service_URL, serviceData, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const response = await axios.post(
+        `${BASE_URL}/services.json?auth=${token}`,
+        serviceData,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
 
       if (response.status >= 300 && response.status < 400) {
         console.warn("Redirect detected in POST request:", response.status);
@@ -139,7 +181,7 @@ const ServiceAdd = () => {
           <div className="flex items-center space-x-4">
             <img
               src={newImage || "https://webemps.com/images/default-image.jpg"}
-              alt="Erro"
+              alt="Preview"
               className="w-16 h-16 rounded-full object-cover"
             />
             <div className="relative h-[50px] w-[130px]">
@@ -150,12 +192,15 @@ const ServiceAdd = () => {
                 onChange={handleImageChange}
                 accept=".jpg, .png"
                 className="hidden"
+                disabled={uploading}
               />
               <label
                 htmlFor="customFile"
-                className="absolute top-0 left-0 w-full h-full flex items-center px-[0.75rem] py-[0.375rem] text-[15px] leading-6 overflow-hidden text-headingColor bg-[#0066ff46] font-semibold rounded-lg truncate cursor-pointer"
+                className={`absolute top-0 left-0 w-full h-full flex items-center px-[0.75rem] py-[0.375rem] text-[15px] leading-6 overflow-hidden text-headingColor bg-[#0066ff46] font-semibold rounded-lg truncate cursor-pointer ${
+                  uploading ? "opacity-50 cursor-not-allowed" : ""
+                }`}
               >
-                Upload Photo
+                {uploading ? "Uploading..." : "Upload Photo"}
               </label>
             </div>
           </div>
@@ -163,7 +208,10 @@ const ServiceAdd = () => {
         <div className="flex justify-end space-x-4">
           <button
             type="submit"
-            className="text-white bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded hover:cursor-pointer"
+            disabled={uploading}
+            className={`text-white bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded hover:cursor-pointer ${
+              uploading ? "opacity-50 cursor-not-allowed" : ""
+            }`}
           >
             Save
           </button>

@@ -1,4 +1,3 @@
-// Appointments.jsx
 import { useEffect, useState, useContext } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
@@ -34,34 +33,56 @@ const Appointments = () => {
         return;
       }
 
+      if (!authToken) {
+        toast.error("Authentication token is missing. Please log in again.");
+        navigate("/login");
+        return;
+      }
+
       setLoading(true);
       try {
-        const appointmentsRes = await fetch(`${BASE_URL}/appointments`, {
-          headers: { Authorization: `Bearer ${authToken}` },
-        });
+        const appointmentsRes = await fetch(
+          `${BASE_URL}/appointments.json?auth=${authToken}`,
+          {
+            headers: { Authorization: `Bearer ${authToken}` },
+          }
+        );
         if (!appointmentsRes.ok) {
           const errorText = await appointmentsRes.text();
           throw new Error(errorText || "Failed to fetch appointments");
         }
         const appointmentsData = await appointmentsRes.json();
 
-        const doctorsRes = await fetch(`${BASE_URL}/doctors`, {
-          headers: { Authorization: `Bearer ${authToken}` },
-        });
+        const doctorsRes = await fetch(
+          `${BASE_URL}/doctors.json?auth=${authToken}`,
+          {
+            headers: { Authorization: `Bearer ${authToken}` },
+          }
+        );
         if (!doctorsRes.ok) {
           const errorText = await doctorsRes.text();
           throw new Error(errorText || "Failed to fetch doctors");
         }
         const doctorsData = await doctorsRes.json();
 
-        const enrichedAppointments = appointmentsData.map((appt) => ({
-          ...appt,
-          doctorEmail:
-            doctorsData.find((d) => d.id === appt.doctorId)?.email || "N/A",
+        const enrichedAppointments = Object.keys(appointmentsData || {}).map(
+          (key) => ({
+            firebaseKey: key,
+            ...appointmentsData[key],
+            doctorEmail:
+              Object.values(doctorsData || {}).find(
+                (d) => d.id === appointmentsData[key].doctorId
+              )?.email || "N/A",
+          })
+        );
+
+        const doctorsArray = Object.keys(doctorsData || {}).map((key) => ({
+          firebaseKey: key,
+          ...doctorsData[key],
         }));
 
         setAppointments(enrichedAppointments);
-        setDoctors(doctorsData);
+        setDoctors(doctorsArray);
       } catch (error) {
         console.error("Fetch error:", error);
         toast.error("Failed to load appointments: " + error.message);
@@ -93,7 +114,10 @@ const Appointments = () => {
   };
 
   const handleSave = async () => {
-    if (!selectedAppointment) return;
+    if (!selectedAppointment || !selectedAppointment.firebaseKey) {
+      toast.error("No appointment selected or invalid appointment key");
+      return;
+    }
 
     if (!editForm.timeSlot.trim()) {
       toast.error("Time slot is required");
@@ -131,7 +155,7 @@ const Appointments = () => {
 
     try {
       const response = await fetch(
-        `${BASE_URL}/appointments/${selectedAppointment.id}`,
+        `${BASE_URL}/appointments/${selectedAppointment.firebaseKey}.json?auth=${authToken}`,
         {
           method: "PATCH",
           headers: {
@@ -151,7 +175,9 @@ const Appointments = () => {
 
       setAppointments((prevAppointments) =>
         prevAppointments.map((appt) =>
-          appt.id === selectedAppointment.id ? updatedAppointment : appt
+          appt.firebaseKey === selectedAppointment.firebaseKey
+            ? { ...appt, ...updatedAppointment }
+            : appt
         )
       );
 
@@ -163,14 +189,35 @@ const Appointments = () => {
     }
   };
 
-  const handleDelete = async (appointmentId) => {
-    if (!window.confirm("Are you sure you want to delete this appointment?")) {
+  const handleDelete = async (firebaseKey) => {
+    const appointment = appointments.find(
+      (appt) => appt.firebaseKey === firebaseKey
+    );
+    if (!appointment) {
+      toast.error("Appointment not found");
+      return;
+    }
+
+    const result = await Swal.fire({
+      title: "Confirm Deletion",
+      text: `Are you sure you want to delete the appointment for ${appointment.user.name}? This action cannot be undone.`,
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonColor: "#d33",
+      cancelButtonColor: "#3085d6",
+      confirmButtonText: "Yes, delete!",
+      cancelButtonText: "Cancel",
+      allowOutsideClick: false,
+      allowEscapeKey: false,
+    });
+
+    if (!result.isConfirmed) {
       return;
     }
 
     try {
       const response = await fetch(
-        `${BASE_URL}/appointments/${appointmentId}`,
+        `${BASE_URL}/appointments/${firebaseKey}.json?auth=${authToken}`,
         {
           method: "DELETE",
           headers: {
@@ -185,7 +232,7 @@ const Appointments = () => {
       }
 
       setAppointments((prevAppointments) =>
-        prevAppointments.filter((appt) => appt.id !== appointmentId)
+        prevAppointments.filter((appt) => appt.firebaseKey !== firebaseKey)
       );
 
       toast.success("Appointment deleted successfully");
@@ -214,7 +261,7 @@ const Appointments = () => {
             ) : (
               appointments.map((appt) => (
                 <div
-                  key={appt.id}
+                  key={appt.firebaseKey}
                   className="bg-white shadow-md rounded-lg p-4 border border-gray-200 transition-shadow"
                 >
                   <h3 className="text-lg font-semibold text-headingColor mb-1">
@@ -248,7 +295,7 @@ const Appointments = () => {
                       Details
                     </button>
                     <button
-                      onClick={() => handleDelete(appt.id)}
+                      onClick={() => handleDelete(appt.firebaseKey)}
                       className="text-sm text-red-600 hover:underline hover:cursor-pointer"
                     >
                       Delete

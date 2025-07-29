@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import Swal from "sweetalert2";
-import { service_URL, token } from "../../config";
+import { service_URL, BASE_URL, token } from "../../config";
 import Loading from "../../Components/Loader/Loading";
 
 const AllServices = () => {
@@ -13,16 +13,23 @@ const AllServices = () => {
   useEffect(() => {
     const fetchServices = async () => {
       try {
-        const response = await axios.get(service_URL, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
+        const response = await axios.get(service_URL);
+
         if (response.status >= 300 && response.status < 400) {
           console.warn("Redirect detected in GET /services:", response.status);
           throw new Error("Unexpected redirect from server");
         }
-        setServices(response.data);
+
+        if (response.data) {
+          const servicesArray = Object.keys(response.data).map((key) => ({
+            id: response.data[key].id,
+            firebaseKey: key,
+            ...response.data[key],
+          }));
+          setServices(servicesArray);
+        } else {
+          setServices([]);
+        }
       } catch (error) {
         console.error("Error fetching services:", error);
         Swal.fire({
@@ -37,21 +44,11 @@ const AllServices = () => {
         setLoading(false);
       }
     };
-    if (!token) {
-      Swal.fire({
-        title: "Error!",
-        text: "Please log in to view services.",
-        icon: "error",
-        confirmButtonColor: "#3085d6",
-        confirmButtonText: "OK",
-      });
-      navigate("/login");
-      return;
-    }
+
     fetchServices();
   }, [navigate]);
 
-  const handleDelete = async (event, id, name) => {
+  const handleDelete = async (event, firebaseKey, name) => {
     event.preventDefault();
 
     const result = await Swal.fire({
@@ -70,18 +67,21 @@ const AllServices = () => {
     if (!result.isConfirmed) return;
 
     try {
-      const response = await axios.delete(`${service_URL}/${id}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      if (!token) {
+        throw new Error("Please log in to delete services.");
+      }
+
+      const deleteServiceURL = `${BASE_URL}/services/${firebaseKey}.json?auth=${token}`;
+      const response = await axios.delete(deleteServiceURL);
 
       if (response.status >= 300 && response.status < 400) {
         console.warn("Redirect detected in DELETE request:", response.status);
         throw new Error("Unexpected redirect from server");
       }
 
-      setServices((prev) => prev.filter((service) => service.id !== id));
+      setServices((prev) =>
+        prev.filter((service) => service.firebaseKey !== firebaseKey)
+      );
       Swal.fire({
         title: "Deleted!",
         text: `Service "${name}" has been deleted successfully.`,
@@ -142,7 +142,7 @@ const AllServices = () => {
               </tr>
             ) : (
               services.map((service) => (
-                <tr key={service.id} className="hover:bg-gray-50">
+                <tr key={service.firebaseKey} className="hover:bg-gray-50">
                   <td className="py-2 px-4 border-b text-right">
                     {service.id}
                   </td>
@@ -165,7 +165,9 @@ const AllServices = () => {
                   </td>
                   <td className="py-2 px-4 border-b text-right gap-[2em]">
                     <button
-                      onClick={(e) => handleDelete(e, service.id, service.name)}
+                      onClick={(e) =>
+                        handleDelete(e, service.firebaseKey, service.name)
+                      }
                       className="text-white bg-red-500 hover:bg-red-600 px-3 py-1 rounded hover:cursor-pointer mx-1"
                     >
                       Delete
@@ -173,7 +175,6 @@ const AllServices = () => {
                     <button
                       onClick={(e) => {
                         e.preventDefault();
-
                         navigate(`/services/${service.id}`);
                       }}
                       className="text-white mt-2 bg-blue-500 hover:bg-blue-600 px-3 py-1 rounded hover:cursor-pointer mx-1"

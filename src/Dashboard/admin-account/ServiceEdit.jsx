@@ -2,52 +2,60 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 import Swal from "sweetalert2";
-import { service_URL, token } from "../../config";
+import { service_URL, BASE_URL } from "../../config";
 import uploadImageToCloudinary from "../../utils/uploadCloudinary";
 import Loading from "../../Components/Loader/Loading";
 
 const ServiceEdit = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [formData, setFormData] = useState({ name: "", desc: "", image: "" });
+  const [formData, setFormData] = useState({
+    name: "",
+    desc: "",
+    image: "",
+    id: "",
+  });
   const [originalData, setOriginalData] = useState(null);
   const [newImage, setNewImage] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [firebaseKey, setFirebaseKey] = useState(null);
 
   useEffect(() => {
     const fetchService = async () => {
-      if (!token) {
-        Swal.fire({
-          title: "Error!",
-          text: "Please log in to edit services.",
-          icon: "error",
-          confirmButtonColor: "#3085d6",
-          confirmButtonText: "OK",
-        });
-        navigate("/login");
-        return;
-      }
       try {
-        const response = await axios.get(`${service_URL}/${id}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const response = await axios.get(service_URL);
+
         if (response.status >= 300 && response.status < 400) {
-          console.warn(
-            "Redirect detected in GET /services/:id:",
-            response.status
-          );
+          console.warn("Redirect detected in GET /services:", response.status);
           throw new Error("Unexpected redirect from server");
         }
-        const data = response.data;
+
+        const services = response.data;
+        if (!services) {
+          throw new Error("No services found");
+        }
+
+        const serviceKey = Object.keys(services).find(
+          (key) => services[key].id === id
+        );
+
+        if (!serviceKey) {
+          throw new Error("Service not found");
+        }
+
+        const serviceData = services[serviceKey];
+        setFirebaseKey(serviceKey);
         setFormData({
-          name: data.name || "",
-          desc: data.desc || "",
-          image: data.image || "",
+          name: serviceData.name || "",
+          desc: serviceData.desc || "",
+          image: serviceData.image || "",
+          id: serviceData.id || id,
         });
         setOriginalData({
-          name: data.name || "",
-          desc: data.desc || "",
-          image: data.image || "",
+          name: serviceData.name || "",
+          desc: serviceData.desc || "",
+          image: serviceData.image || "",
+          id: serviceData.id || id,
         });
       } catch (error) {
         console.error("Error fetching service:", error);
@@ -94,6 +102,17 @@ const ServiceEdit = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
+    if (!firebaseKey) {
+      Swal.fire({
+        title: "Error!",
+        text: "Service key not found.",
+        icon: "error",
+        confirmButtonColor: "#3085d6",
+        confirmButtonText: "OK",
+      });
+      return;
+    }
+
     const updatedFields = {};
     if (formData.name !== originalData?.name)
       updatedFields.name = formData.name;
@@ -101,6 +120,7 @@ const ServiceEdit = () => {
       updatedFields.desc = formData.desc;
     if (newImage || formData.image !== originalData?.image)
       updatedFields.image = formData.image;
+    if (formData.id) updatedFields.id = formData.id;
 
     if (!Object.keys(updatedFields).length) {
       Swal.fire({
@@ -114,13 +134,9 @@ const ServiceEdit = () => {
     }
 
     try {
-      console.log(`Updating service ${id} with:`, updatedFields);
       const response = await axios.patch(
-        `${service_URL}/${id}`,
-        updatedFields,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
+        `${BASE_URL}/services/${firebaseKey}.json`,
+        updatedFields
       );
 
       if (response.status >= 300 && response.status < 400) {

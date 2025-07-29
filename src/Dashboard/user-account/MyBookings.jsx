@@ -1,8 +1,9 @@
 import { useContext, useEffect, useState } from "react";
 import { authContext } from "../../context/AuthContext";
-import { BASE_URL, token } from "../../config";
+import { getDatabase, ref, get } from "firebase/database";
 import Loading from "../../Components/Loader/Loading";
 import Error from "../../Components/Error/Error";
+import { doctor_URL } from "../../config";
 
 const MyBookings = () => {
   const { userId } = useContext(authContext);
@@ -13,26 +14,26 @@ const MyBookings = () => {
   useEffect(() => {
     if (!userId) {
       setError("Please log in to view your bookings.");
+      setLoading(false);
       return;
     }
 
     const fetchAppointments = async () => {
       setLoading(true);
       try {
-        const res = await fetch(`${BASE_URL}/appointments`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
+        const db = getDatabase();
+        const appointmentsRef = ref(db, "appointments");
+        const appointmentsSnapshot = await get(appointmentsRef);
 
-        if (!res.ok) {
-          throw new Error("Failed to fetch appointments");
+        if (!appointmentsSnapshot.exists()) {
+          setAppointments([]);
+          setLoading(false);
+          return;
         }
 
-        const appointmentData = await res.json();
-
+        const appointmentData = Object.values(appointmentsSnapshot.val() || {});
         const userAppointments = appointmentData.filter(
-          (app) => app.user.id === userId && app.state === "un"
+          (app) => app.user?.id === userId && app.state === "un"
         );
 
         if (userAppointments.length === 0) {
@@ -41,21 +42,23 @@ const MyBookings = () => {
           return;
         }
 
+        const doctorsSnapshot = await get(ref(db, "doctors"));
+        const doctorsData = doctorsSnapshot.exists()
+          ? Object.values(doctorsSnapshot.val())
+          : [];
+
         const enrichedAppointments = await Promise.all(
           userAppointments.map(async (appointment) => {
             const doctorId =
               appointment.doctorId ||
-              (appointment.doctor && appointment.doctor.id);
+              (appointment.doctor && appointment.doctor.id) ||
+              "unknown";
 
-            const doctorRes = await fetch(`${BASE_URL}/doctors/${doctorId}`, {
-              headers: {
-                Authorization: `Bearer ${token}`,
-              },
-            });
+            const doctorData = doctorsData.find((doc) => doc.id === doctorId);
 
-            if (!doctorRes.ok) {
+            if (!doctorData) {
               console.warn(
-                `Failed to fetch doctor details for ID: ${doctorId}`
+                `Doctor not found for ID: ${doctorId}. Please check the 'doctors' node in Firebase.`
               );
               return {
                 ...appointment,
@@ -69,7 +72,6 @@ const MyBookings = () => {
               };
             }
 
-            const doctorData = await doctorRes.json();
             return {
               ...appointment,
               doctor: {
@@ -87,7 +89,11 @@ const MyBookings = () => {
         setAppointments(enrichedAppointments);
       } catch (err) {
         console.error("Error fetching appointments:", err);
-        setError(err.message || "Something went wrong. Please try again.");
+        setError(
+          err.message === "Permission denied"
+            ? "Please log in to view your bookings."
+            : err.message || "Failed to fetch appointments"
+        );
       } finally {
         setLoading(false);
       }
@@ -117,27 +123,30 @@ const MyBookings = () => {
               >
                 <div className="flex items-center space-x-4 mb-4">
                   <img
-                    src={appointment.doctor.photo}
+                    src={
+                      appointment.doctor?.photo ||
+                      "https://static.vecteezy.com/system/resources/thumbnails/009/292/244/small/default-avatar-icon-of-social-media-user-vector.jpg"
+                    }
                     alt="Doctor"
                     className="w-16 h-16 rounded-full object-cover"
                   />
                   <div>
                     <p className="text-lg font-semibold text-headingColor">
-                      Doctor: {appointment.doctor.name}
+                      Doctor: {appointment.doctor?.name || "Unknown Doctor"}
                     </p>
                     <p className="text-textColor">
-                      Patient: {appointment.user.name}
+                      Patient: {appointment.user?.name || "Unknown User"}
                     </p>
                   </div>
                 </div>
                 <div className="space-y-2">
                   <p className="text-textColor">
                     <span className="font-semibold">Ticket Price:</span>{" "}
-                    {appointment.ticketPrice} BDT
+                    {appointment.ticketPrice || "N/A"} BDT
                   </p>
                   <p className="text-textColor">
                     <span className="font-semibold">Time Slot:</span>{" "}
-                    {appointment.timeSlot}
+                    {appointment.timeSlot || "Not specified"}
                   </p>
                   <p className="text-textColor">
                     <span className="font-semibold">Queue Number:</span>{" "}

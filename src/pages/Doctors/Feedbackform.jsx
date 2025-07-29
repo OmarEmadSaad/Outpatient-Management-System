@@ -3,7 +3,7 @@ import { AiFillStar, AiOutlineStar } from "react-icons/ai";
 import { useParams } from "react-router-dom";
 import { toast } from "react-toastify";
 import HashLoader from "react-spinners/HashLoader";
-import { BASE_URL, token } from "../../config";
+import { getDatabase, ref, push, set } from "firebase/database";
 
 const Feedbackform = ({ onSubmitSuccess }) => {
   const [rating, setRating] = useState(0);
@@ -26,8 +26,14 @@ const Feedbackform = ({ onSubmitSuccess }) => {
     e.preventDefault();
     setLoading(true);
 
-    if (!token) {
-      toast.error("Authentication token is missing. Please log in.");
+    if (!userId || typeof userId !== "string" || userId.trim() === "") {
+      toast.error("Invalid user information. Please log in.");
+      setLoading(false);
+      return;
+    }
+
+    if (!doctorId) {
+      toast.error("Doctor information is missing");
       setLoading(false);
       return;
     }
@@ -38,18 +44,11 @@ const Feedbackform = ({ onSubmitSuccess }) => {
       return;
     }
 
-    if (!userId || typeof userId !== "string" || userId.trim() === "") {
-      toast.error("Invalid user information. Please log in.");
-      setLoading(false);
-      return;
-    }
-    if (!doctorId) {
-      toast.error("Doctor information is missing");
-      setLoading(false);
-      return;
-    }
-
     try {
+      const db = getDatabase();
+      const reviewsRef = ref(db, "reviews");
+      const newReviewRef = push(reviewsRef);
+
       const reviewData = {
         userId,
         doctorId,
@@ -59,23 +58,7 @@ const Feedbackform = ({ onSubmitSuccess }) => {
         createdAt: new Date().toISOString(),
       };
 
-      console.log("Submitting review:", reviewData);
-
-      const res = await fetch(`${BASE_URL}/reviews`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(reviewData),
-      });
-
-      const result = await res.json();
-      if (!res.ok) {
-        throw new Error(
-          result.message || result.error || "Failed to submit review"
-        );
-      }
+      await set(newReviewRef, reviewData);
 
       toast.success("Review submitted successfully");
       setRating(0);
@@ -85,8 +68,12 @@ const Feedbackform = ({ onSubmitSuccess }) => {
         onSubmitSuccess(reviewData);
       }
     } catch (err) {
-      toast.error(`Failed to submit review: ${err.message}`);
       console.error("Error submitting review:", err);
+      toast.error(
+        err.message === "Permission denied"
+          ? "Please log in to submit a review."
+          : `Failed to submit review: ${err.message}`
+      );
     } finally {
       setLoading(false);
     }

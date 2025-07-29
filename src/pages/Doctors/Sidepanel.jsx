@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "react-toastify";
-import { BASE_URL, token } from "../../config";
 import convertTime from "../../utils/convertTime";
 import { v4 as uuidv4 } from "uuid";
+import { getDatabase, ref, get, set } from "firebase/database";
+import { getAuth, onAuthStateChanged } from "firebase/auth";
+import { BASE_URL, User_URL, doctor_URL, admin_URL } from "../../config";
 
 const Sidepanel = ({
   doctorId,
@@ -17,61 +19,154 @@ const Sidepanel = ({
   const [doctorPhone, setDoctorPhone] = useState(null);
   const [doctorNameFromFetch, setDoctorNameFromFetch] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
   const { id } = useParams();
   const navigate = useNavigate();
 
-  const userId = localStorage.getItem("userId");
+  useEffect(() => {
+    if (doctorId !== id) {
+      console.warn(
+        `Doctor ID mismatch: prop doctorId=${doctorId}, URL id=${id}`
+      );
+      toast.warn("Doctor ID mismatch detected. Please try again.");
+    }
+  }, [doctorId, id]);
+
+  useEffect(() => {
+    const auth = getAuth();
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        localStorage.setItem("userId", user.uid);
+        localStorage.setItem("token", user.accessToken);
+        setAuthLoading(false);
+      } else {
+        const userId = localStorage.getItem("userId");
+        const token = localStorage.getItem("token");
+        if (!userId || !token) {
+          toast.warn("You need to log in to book an appointment.");
+          setUserData({
+            id: "anonymous",
+            name: "Anonymous User",
+            email: "no-email@example.com",
+            photo:
+              "https://static.vecteezy.com/system/resources/thumbnails/009/292/244/small/default-avatar-icon-of-social-media-user-vector.jpg",
+            gender: "Unknown",
+          });
+          setAuthLoading(false);
+        } else {
+          setAuthLoading(false);
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, [navigate]);
 
   useEffect(() => {
     const fetchUserData = async () => {
+      const userId = localStorage.getItem("userId");
+      const role = localStorage.getItem("role") || "patient";
+
       if (!userId || userId === "null" || userId === "") {
-        toast.error("Please log in to book an appointment");
+        setUserData({
+          id: "anonymous",
+          name: "Anonymous User",
+          email: "no-email@example.com",
+          photo:
+            "https://static.vecteezy.com/system/resources/thumbnails/009/292/244/small/default-avatar-icon-of-social-media-user-vector.jpg",
+          gender: "Unknown",
+        });
         return;
       }
 
       try {
-        const res = await fetch(`${BASE_URL}/users/${userId}`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          throw new Error(data.message || "Failed to fetch user data");
+        const db = getDatabase();
+        let collectionRef;
+        let foundUser = null;
+
+        if (role === "patient") {
+          collectionRef = ref(db, `users`);
+        } else if (role === "doctor") {
+          collectionRef = ref(db, `doctors`);
+        } else if (role === "admin") {
+          collectionRef = ref(db, `admin`);
+        } else {
+          throw new Error("Invalid role");
         }
+
+        const snapshot = await get(collectionRef);
+
+        if (snapshot.exists()) {
+          const data = snapshot.val();
+          foundUser = Object.values(data).find((item) => item.id === userId);
+        }
+
+        if (!foundUser) {
+          console.warn("User data not found for userId:", userId);
+          toast.warn("User data not found. Using default user data.");
+          setUserData({
+            id: userId,
+            name: "Anonymous User",
+            email: "no-email@example.com",
+            photo:
+              "https://static.vecteezy.com/system/resources/thumbnails/009/292/244/small/default-avatar-icon-of-social-media-user-vector.jpg",
+            gender: "Unknown",
+          });
+          return;
+        }
+
         setUserData({
-          id: data.id,
-          name: data.name,
-          email: data.email,
+          id: foundUser.id || userId,
+          name: foundUser.name || "Unknown User",
+          email: foundUser.email || "no-email@example.com",
           photo:
-            data.photo ||
+            foundUser.photo ||
             "https://static.vecteezy.com/system/resources/thumbnails/009/292/244/small/default-avatar-icon-of-social-media-user-vector.jpg",
-          gender: data.gender || "Unknown",
+          gender: foundUser.gender || "Unknown",
         });
       } catch (err) {
-        toast.error(err.message);
+        console.error("Error fetching user data:", err);
+        toast.error(
+          err.message ||
+            "Failed to fetch user data. Please ensure you have permission."
+        );
+        setUserData({
+          id: userId || "anonymous",
+          name: "Anonymous User",
+          email: "no-email@example.com",
+          photo:
+            "https://static.vecteezy.com/system/resources/thumbnails/009/292/244/small/default-avatar-icon-of-social-media-user-vector.jpg",
+          gender: "Unknown",
+        });
       }
     };
 
-    fetchUserData();
-  }, [userId]);
+    if (!authLoading) {
+      fetchUserData();
+    }
+  }, [authLoading]);
 
   useEffect(() => {
     const fetchDoctorPhone = async () => {
       try {
-        const res = await fetch(`${BASE_URL}/doctors/${doctorId}`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          throw new Error(data.message || "Failed to fetch doctor data");
+        const db = getDatabase();
+        const doctorsRef = ref(db, `doctors`);
+        const doctorsSnapshot = await get(doctorsRef);
+        if (!doctorsSnapshot.exists()) {
+          throw new Error("No doctors found in database");
         }
-        setDoctorPhone(data.phone || "Not available");
-        setDoctorNameFromFetch(data.name || "Unknown Doctor");
+        const doctors = doctorsSnapshot.val();
+        const doctorData = Object.values(doctors).find(
+          (doc) => doc.id === doctorId
+        );
+        if (!doctorData) {
+          throw new Error(`Doctor with ID ${doctorId} not found`);
+        }
+        setDoctorPhone(doctorData.phone || "Not available");
+        setDoctorNameFromFetch(doctorData.name || "Unknown Doctor");
       } catch (err) {
-        toast.error(err.message);
+        console.error("Error fetching doctor data:", err);
+        toast.error(err.message || "Failed to fetch doctor data");
       }
     };
 
@@ -196,13 +291,12 @@ const Sidepanel = ({
   };
 
   const bookingHandler = async () => {
+    const userId = localStorage.getItem("userId");
+    const token = localStorage.getItem("token");
+
     if (!token || !userId || userId === "null" || userId === "") {
       toast.error("Please log in to book an appointment");
-      return;
-    }
-
-    if (!userData) {
-      toast.error("User data not loaded. Please try again.");
+      navigate("/login");
       return;
     }
 
@@ -215,17 +309,14 @@ const Sidepanel = ({
     setLoading(true);
 
     try {
-      const resAppointments = await fetch(`${BASE_URL}/appointments`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const db = getDatabase();
+      const appointmentsRef = ref(db, `appointments`);
+      const appointmentsSnapshot = await get(appointmentsRef);
 
-      if (!resAppointments.ok) {
-        throw new Error("Failed to fetch existing appointments");
-      }
+      const appointments = appointmentsSnapshot.exists()
+        ? Object.values(appointmentsSnapshot.val() || {})
+        : [];
 
-      const appointments = await resAppointments.json();
       const matchingAppointments = appointments.filter(
         (app) => app.doctorId === doctorId && app.timeSlot === selectedTimeSlot
       );
@@ -243,15 +334,20 @@ const Sidepanel = ({
 
       const finalDoctorName =
         doctorName || doctorNameFromFetch || "Unknown Doctor";
+      const finalDoctorPhoto =
+        doctorPhoto ||
+        "https://static.vecteezy.com/system/resources/thumbnails/009/292/244/small/default-avatar-icon-of-social-media-user-vector.jpg";
 
       const newAppointment = {
         id: `app${Date.now()}${uuidv4().slice(0, 8)}`,
         user: {
-          id: userData.id,
-          name: userData.name,
-          email: userData.email,
-          photo: userData.photo,
-          gender: userData.gender,
+          id: userId || "anonymous",
+          name: userData?.name || "Anonymous User",
+          email: userData?.email || "no-email@example.com",
+          photo:
+            userData?.photo ||
+            "https://static.vecteezy.com/system/resources/thumbnails/009/292/244/small/default-avatar-icon-of-social-media-user-vector.jpg",
+          gender: userData?.gender || "Unknown",
         },
         doctorId: doctorId,
         ticketPrice: ticketPrice?.toString() || "100",
@@ -264,33 +360,20 @@ const Sidepanel = ({
         doctor: {
           id: doctorId,
           name: finalDoctorName,
-          photo:
-            doctorPhoto ||
-            "https://static.vecteezy.com/system/resources/thumbnails/009/292/244/small/default-avatar-icon-of-social-media-user-vector.jpg",
+          photo: finalDoctorPhoto,
           phone: doctorPhone || "Not available",
         },
       };
 
-      const res = await fetch(`${BASE_URL}/appointments`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(newAppointment),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.message || "Failed to book appointment");
-      }
+      const newAppointmentRef = ref(db, `appointments/${newAppointment.id}`);
+      await set(newAppointmentRef, newAppointment);
 
       toast.success("Appointment booked successfully!");
       window.dispatchEvent(new Event("appointment:created"));
       navigate(`/users/profile/me`);
     } catch (err) {
-      toast.error(err.message);
+      console.error("Booking error:", err);
+      toast.error(err.message || "Failed to book appointment");
     } finally {
       setLoading(false);
     }
@@ -298,63 +381,73 @@ const Sidepanel = ({
 
   return (
     <div className="shadow-panelShadow p-3 lg:p-5 rounded-md">
-      <div className="flex justify-between items-center">
-        <p className="text__para mt-0 font-semibold">Ticket Price</p>
-        <span className="text-[16px] leading-7 lg:text-[22px] lg:leading-8 text-headingColor font-bold">
-          {ticketPrice ? `${ticketPrice} BDT` : "Not specified"}
-        </span>
-      </div>
-
-      <div className="mt-[30px]">
-        <p className="text__para mt-0 font-semibold text-headingColor">
-          Available Time Slots
-        </p>
-        {timeSlots?.length > 0 ? (
-          <div>
-            <select
-              value={selectedTimeSlot}
-              onChange={(e) => setSelectedTimeSlot(e.target.value)}
-              className="w-full p-2 border rounded-md mt-3"
-              disabled={loading}
-            >
-              <option value="">Choose a time slot</option>
-              {timeSlots
-                .filter(
-                  (item) =>
-                    item && item.day && item.startingTime && item.endingTime
-                )
-                .map((item, index) => (
-                  <option
-                    key={index}
-                    value={`${
-                      item.day.charAt(0).toUpperCase() + item.day.slice(1)
-                    }: ${convertTime(item.startingTime)} - ${convertTime(
-                      item.endingTime
-                    )}`}
-                  >
-                    {item.day.charAt(0).toUpperCase() + item.day.slice(1)}:{" "}
-                    {convertTime(item.startingTime)} -{" "}
-                    {convertTime(item.endingTime)}
-                  </option>
-                ))}
-            </select>
+      {authLoading ? (
+        <p>Loading user authentication...</p>
+      ) : (
+        <>
+          <div className="flex justify-between items-center">
+            <p className="text__para mt-0 font-semibold">Ticket Price</p>
+            <span className="text-[16px] leading-7 lg:text-[22px] lg:leading-8 text-headingColor font-bold">
+              {ticketPrice ? `${ticketPrice} BDT` : "Not specified"}
+            </span>
           </div>
-        ) : (
-          <p className="text-[15px] leading-6 text-textColor mt-2">
-            No available time slots.
-          </p>
-        )}
-      </div>
 
-      <button
-        onClick={bookingHandler}
-        disabled={loading}
-        className={`btn btn-accent text-white bg-blue-600 px-2 rounded-md w-full mt-[0.5em] ${
-          loading ? "opacity-50 cursor-not-allowed" : ""
-        }`}
-      >
-        {loading ? "Booking..." : "Book Appointment"}
-      </button>
+          <div className="mt-[30px]">
+            <p className="text__para mt-0 font-semibold text-headingColor">
+              Available Time Slots
+            </p>
+            {timeSlots?.length > 0 ? (
+              <div>
+                <select
+                  value={selectedTimeSlot}
+                  onChange={(e) => setSelectedTimeSlot(e.target.value)}
+                  className="w-full p-2 border rounded-md mt-3"
+                  disabled={loading}
+                >
+                  <option value="">Choose a time slot</option>
+                  {timeSlots
+                    .filter(
+                      (item) =>
+                        item && item.day && item.startingTime && item.endingTime
+                    )
+                    .map((item, index) => (
+                      <option
+                        key={index}
+                        value={`${
+                          item.day.charAt(0).toUpperCase() + item.day.slice(1)
+                        }: ${convertTime(item.startingTime)} - ${convertTime(
+                          item.endingTime
+                        )}`}
+                      >
+                        {item.day.charAt(0).toUpperCase() + item.day.slice(1)}:{" "}
+                        {convertTime(item.startingTime)} -{" "}
+                        {convertTime(item.endingTime)}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            ) : (
+              <p className="text-[15px] leading-6 text-textColor mt-2">
+                No available time slots.
+              </p>
+            )}
+          </div>
+
+          <button
+            onClick={bookingHandler}
+            disabled={
+              loading || authLoading || !userData || userData.id === "anonymous"
+            }
+            className={`btn btn-accent text-white bg-blue-600 px-2 rounded-md w-full mt-[0.5em] ${
+              loading || authLoading || !userData || userData.id === "anonymous"
+                ? "opacity-50 cursor-not-allowed"
+                : ""
+            }`}
+          >
+            {loading ? "Booking..." : "Book Appointment"}
+          </button>
+        </>
+      )}
     </div>
   );
 };

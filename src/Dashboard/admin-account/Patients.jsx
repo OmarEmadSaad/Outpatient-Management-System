@@ -2,12 +2,14 @@ import { useEffect, useState, useContext } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 import HashLoader from "react-spinners/HashLoader";
-import { authContext } from "../../context/AuthContext";
-import { BASE_URL } from "../../config";
 import Swal from "sweetalert2";
+import { authContext } from "../../context/AuthContext";
+
+import { ref, get, child, set, update } from "firebase/database";
+import { db } from "../../../firebase/config";
 
 const Patients = () => {
-  const { userId, role, token: authToken } = useContext(authContext);
+  const { userId, role } = useContext(authContext);
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState([]);
@@ -29,49 +31,57 @@ const Patients = () => {
 
       setLoading(true);
       try {
-        const usersRes = await fetch(`${BASE_URL}/users`, {
-          headers: { Authorization: `Bearer ${authToken}` },
-        });
-        if (!usersRes.ok) {
-          const errorText = await usersRes.text();
-          throw new Error(errorText || "Failed to fetch patients");
-        }
-        const usersData = await usersRes.json();
+        const dbRef = ref(db);
+        const usersSnapshot = await get(child(dbRef, "users"));
 
-        const adminsRes = await fetch(`${BASE_URL}/admin`, {
-          headers: { Authorization: `Bearer ${authToken}` },
-        });
-        if (!adminsRes.ok) {
-          const errorText = await adminsRes.text();
-          throw new Error(errorText || "Failed to fetch admins");
-        }
-        const adminsData = await adminsRes.json();
+        const userMap = new Map();
 
-        const filteredUsers = usersData.filter(
+        if (usersSnapshot.exists()) {
+          usersSnapshot.forEach((childSnapshot) => {
+            const user = {
+              id: childSnapshot.key,
+              ...childSnapshot.val(),
+            };
+
+            if (!userMap.has(user.id)) {
+              userMap.set(user.id, user);
+            }
+          });
+        }
+
+        const allUsersData = Array.from(userMap.values());
+
+        const regularUsers = allUsersData.filter(
           (user) =>
-            user.id !== userId && !(user.id === "1" && user.role === "admin")
-        );
-        const filteredAdmins = adminsData.filter(
-          (admin) =>
-            admin.id !== userId && !(admin.id === "1" && admin.role === "admin")
+            (user.role === "patient" || !user.role) &&
+            user.id !== userId &&
+            !(user.id === "1" && user.role === "admin")
         );
 
-        setUsers(filteredUsers);
-        setAdmins(filteredAdmins);
+        const currentAdmins = allUsersData.filter(
+          (user) =>
+            user.role === "admin" &&
+            user.id !== userId &&
+            !(user.id === "1" && user.role === "admin")
+        );
+
+        setUsers(regularUsers);
+        setAdmins(currentAdmins);
       } catch (error) {
-        toast.error("Failed to load patients: " + error.message);
+        console.error("Error fetching data:", error);
+        toast.error("Failed to load users: " + error.message);
       } finally {
         setLoading(false);
       }
     };
 
     fetchData();
-  }, [userId, role, authToken, navigate]);
+  }, [userId, role, navigate]);
 
-  const handleMakeAdmin = async (user) => {
+  const handleMakeAdmin = async (userToPromote) => {
     const result = await Swal.fire({
       title: "Confirm Promotion",
-      text: `Are you sure you want to promote ${user.name} to admin?`,
+      text: `Are you sure you want to promote ${userToPromote.name} to admin?`,
       icon: "question",
       showCancelButton: true,
       confirmButtonColor: "#3085d6",
@@ -85,47 +95,29 @@ const Patients = () => {
     if (!result.isConfirmed) return;
 
     try {
-      const deleteUserRes = await fetch(`${BASE_URL}/users/${user.id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${authToken}` },
-      });
-      if (!deleteUserRes.ok) {
-        const errorText = await deleteUserRes.text();
-        throw new Error(errorText || "Failed to remove user from patients");
-      }
+      const userRef = ref(db, `users/${userToPromote.id}`);
+      await update(userRef, { role: "admin" });
 
-      const updatedUser = { ...user, role: "admin" };
-      const addAdminRes = await fetch(`${BASE_URL}/admin`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${authToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(updatedUser),
-      });
-      if (!addAdminRes.ok) {
-        const errorText = await addAdminRes.text();
-        throw new Error(errorText || "Failed to add user to admins");
-      }
+      const updatedUser = { ...userToPromote, role: "admin" };
+      setAdmins((prev) => [...prev, updatedUser]);
+      setUsers((prev) => prev.filter((u) => u.id !== userToPromote.id));
 
-      setAdmins([...admins, updatedUser]);
-      setUsers(users.filter((u) => u.id !== user.id));
-
-      toast.success(`${user.name} has been promoted to admin`);
+      toast.success(`${userToPromote.name} has been promoted to admin`);
     } catch (error) {
+      console.error("Error promoting user:", error);
       toast.error("Failed to promote user: " + error.message);
     }
   };
 
-  const handleRemoveAdmin = async (admin) => {
+  const handleRemoveAdmin = async (adminToRemove) => {
     const result = await Swal.fire({
-      title: "Confirm Removal",
-      text: `Are you sure you want to remove ${admin.name} from admins?`,
+      title: "Confirm Demotion",
+      text: `Are you sure you want to remove ${adminToRemove.name} from admins?`,
       icon: "warning",
       showCancelButton: true,
       confirmButtonColor: "#3085d6",
       cancelButtonColor: "#d33",
-      confirmButtonText: "Yes, remove!",
+      confirmButtonText: "Yes, demote!",
       cancelButtonText: "Cancel",
       allowOutsideClick: false,
       allowEscapeKey: false,
@@ -134,34 +126,16 @@ const Patients = () => {
     if (!result.isConfirmed) return;
 
     try {
-      const deleteAdminRes = await fetch(`${BASE_URL}/admin/${admin.id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${authToken}` },
-      });
-      if (!deleteAdminRes.ok) {
-        const errorText = await deleteAdminRes.text();
-        throw new Error(errorText || "Failed to remove user from admins");
-      }
+      const adminRef = ref(db, `users/${adminToRemove.id}`);
+      await update(adminRef, { role: "patient" });
 
-      const updatedUser = { ...admin, role: "patient" };
-      const addUserRes = await fetch(`${BASE_URL}/users`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${authToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(updatedUser),
-      });
-      if (!addUserRes.ok) {
-        const errorText = await addUserRes.text();
-        throw new Error(errorText || "Failed to add user to patients");
-      }
+      const updatedUser = { ...adminToRemove, role: "patient" };
+      setUsers((prev) => [...prev, updatedUser]);
+      setAdmins((prev) => prev.filter((a) => a.id !== adminToRemove.id));
 
-      setUsers([...users, updatedUser]);
-      setAdmins(admins.filter((a) => a.id !== admin.id));
-
-      toast.success(`${admin.name} has been removed from admins`);
+      toast.success(`${adminToRemove.name} has been demoted to patient`);
     } catch (error) {
+      console.error("Error demoting admin:", error);
       toast.error("Failed to remove admin: " + error.message);
     }
   };
@@ -174,8 +148,8 @@ const Patients = () => {
         </div>
       ) : (
         <>
-          <h1 className="text-2xl font-bold  mb-6 text-blue-500">
-            All Patients
+          <h1 className="text-2xl font-bold mb-6 text-blue-500">
+            All Patients & Admins
           </h1>
           <div className="overflow-x-auto">
             <table className="min-w-full bg-white shadow-md rounded-lg border border-gray-200">
@@ -197,6 +171,9 @@ const Patients = () => {
                     Gender
                   </th>
                   <th className="py-3 px-4 text-left text-sm font-semibold">
+                    Role
+                  </th>
+                  <th className="py-3 px-4 text-left text-sm font-semibold">
                     Actions
                   </th>
                 </tr>
@@ -205,10 +182,10 @@ const Patients = () => {
                 {users.length === 0 && admins.length === 0 ? (
                   <tr>
                     <td
-                      colSpan="6"
+                      colSpan="7"
                       className="py-4 px-4 text-center text-textColor"
                     >
-                      No patients or admins available.
+                      No users available.
                     </td>
                   </tr>
                 ) : (
@@ -226,6 +203,11 @@ const Patients = () => {
                             src={user.photo}
                             alt={user.name}
                             className="w-10 h-10 rounded-full object-cover"
+                            onError={(e) => {
+                              e.target.onerror = null;
+                              e.target.src =
+                                "https://placehold.co/40x40/cccccc/000000?text=No+Img";
+                            }}
                           />
                         </td>
                         <td className="py-3 px-4 text-sm text-textColor">
@@ -237,11 +219,14 @@ const Patients = () => {
                         <td className="py-3 px-4 text-sm text-textColor capitalize">
                           {user.gender}
                         </td>
+                        <td className="py-3 px-4 text-sm text-textColor capitalize">
+                          Patient
+                        </td>
                         <td className="py-3 px-4 text-sm">
                           <button
                             type="button"
                             onClick={() => handleMakeAdmin(user)}
-                            className=" text-white bg-blue-600 px-3 py-1.5 rounded-md text-sm hover:bg-blue-700 mr-2"
+                            className="text-white bg-blue-600 px-3 py-1.5 rounded-md text-sm hover:bg-blue-700 mr-2"
                           >
                             Make Admin
                           </button>
@@ -261,10 +246,15 @@ const Patients = () => {
                             src={admin.photo}
                             alt={admin.name}
                             className="w-10 h-10 rounded-full object-cover"
+                            onError={(e) => {
+                              e.target.onerror = null;
+                              e.target.src =
+                                "https://placehold.co/40x40/cccccc/000000?text=No+Img";
+                            }}
                           />
                         </td>
                         <td className="py-3 px-4 text-sm text-textColor">
-                          {admin.name} (Admin)
+                          {admin.name}
                         </td>
                         <td className="py-3 px-4 text-sm text-textColor">
                           {admin.email}
@@ -272,11 +262,14 @@ const Patients = () => {
                         <td className="py-3 px-4 text-sm text-textColor capitalize">
                           {admin.gender}
                         </td>
+                        <td className="py-3 px-4 text-sm text-textColor capitalize">
+                          Admin
+                        </td>
                         <td className="py-3 px-4 text-sm">
                           <button
                             type="button"
                             onClick={() => handleRemoveAdmin(admin)}
-                            className=" text-white bg-red-600 px-3 py-1.5 rounded-md text-sm hover:bg-red-700"
+                            className="text-white bg-red-600 px-3 py-1.5 rounded-md text-sm hover:bg-red-700"
                           >
                             Remove Admin
                           </button>

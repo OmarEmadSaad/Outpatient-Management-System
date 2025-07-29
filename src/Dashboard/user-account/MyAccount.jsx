@@ -2,12 +2,12 @@ import { useContext, useState } from "react";
 import { authContext } from "../../context/AuthContext";
 import MyBookings from "./MyBookings";
 import Profile from "./Profile";
-import useGetProfile from "../../hooks/UseFetchDate";
 import { BASE_URL, token } from "../../config";
 import Loading from "../../Components/Loader/Loading";
 import Error from "../../Components/Error/Error";
 import Swal from "sweetalert2";
 import HashLoader from "react-spinners/HashLoader";
+import useGetProfile from "../../hooks/useGetProfile";
 
 const MyAccount = () => {
   const { dispatch, userId } = useContext(authContext);
@@ -18,7 +18,7 @@ const MyAccount = () => {
     data: userData,
     loading: profileLoading,
     error,
-  } = useGetProfile(`${BASE_URL}/users/${userId}`);
+  } = useGetProfile("users", userId);
 
   const handleDeleteAccount = async () => {
     Swal.fire({
@@ -60,7 +60,7 @@ const MyAccount = () => {
   };
 
   const defaultAvatar =
-    "https://static.vecteezy.com/system/resources/previews/009/292/244/non_2x/default-avatar-icon-of-social-media-user-vector.jpg";
+    "https://static.vecteezy.com/system/resources/previews/009/292/244/non_2x/default-avatar-icon-of_social_media_user_vector.jpg";
 
   return (
     <section>
@@ -83,15 +83,15 @@ const MyAccount = () => {
 
               <div className="text-center mt-4">
                 <h3 className="text-[18px] leading-[30px] text-headingColor font-bold">
-                  {userData.name}
+                  {userData?.name || "N/A"}
                 </h3>
                 <p className="text-textColor text-[15px] leading-6 font-medium">
-                  {userData.email}
+                  {userData?.email || "N/A"}
                 </p>
                 <p className="text-textColor text-[15px] leading-6 font-medium">
                   Blood Type:
                   <span className="ml-2 text-headingColor text-[22px] leading-8">
-                    {userData.bloodType || "N/A"}
+                    {userData?.bloodType || "N/A"}
                   </span>
                 </p>
               </div>

@@ -34,57 +34,86 @@ const Login = () => {
       } else if (user.role === "admin") {
         urlToUse = admin_URL;
       } else {
-        throw new Error("Invalid role");
+        throw new Error("Invalid role selected. Please choose a valid role.");
       }
 
       const trimmedEmail = user.email.trim();
       const trimmedPassword = user.password.trim();
 
-      const requestUrl = `${urlToUse}?email=${encodeURIComponent(
-        trimmedEmail
-      )}`;
+      const requestUrl = urlToUse;
 
       const res = await fetch(requestUrl);
 
       if (!res.ok) {
-        const message = await res.text();
-        throw new Error(message || "Network error");
+        let errorMessage = res.statusText;
+        try {
+          const errorData = await res.json();
+          if (errorData && errorData.error) {
+            errorMessage = errorData.error;
+          }
+        } catch (parseError) {
+          console.error(
+            "Login.jsx: Failed to parse error response:",
+            parseError
+          );
+        }
+        throw new Error(`Failed to fetch user list: ${errorMessage}`);
       }
 
-      const users = await res.json();
-
-      if (users.length === 0) {
-        throw new Error("User not found");
+      const rawData = await res.json();
+      if (!rawData) {
+        throw new Error(
+          `No data found for the selected role (${user.role}). Please check Firebase.`
+        );
       }
 
-      const matchedUser = users.find(
-        (u) => u.email && u.email === trimmedEmail
+      const usersArray = Object.keys(rawData).map((key) => ({
+        firebaseKey: key,
+        ...rawData[key],
+      }));
+
+      if (usersArray.length === 0) {
+        throw new Error(`No users found for the selected role (${user.role}).`);
+      }
+
+      const matchedUser = usersArray.find(
+        (u) => u.email && u.email.toLowerCase() === trimmedEmail.toLowerCase()
       );
 
       if (!matchedUser) {
-        throw new Error("User not found with matching email");
+        throw new Error(
+          "User not found with matching email in this role. Please check your email or role selection."
+        );
+      }
+      if (matchedUser.role !== user.role) {
+        throw new Error(
+          `Invalid role selected. This user is a ${
+            matchedUser.role || "unknown"
+          }. Please select the correct role.`
+        );
       }
 
       if (!matchedUser.password) {
         throw new Error(
-          "Password not found for this user. Please re-register."
+          "Password not found for this user in database. Please contact support."
         );
       }
 
       if (matchedUser.password !== trimmedPassword) {
-        throw new Error("Incorrect password");
+        throw new Error("Incorrect password. Please try again.");
       }
 
       localStorage.setItem("token", "dummy-token");
-      localStorage.setItem("role", matchedUser.role || user.role);
-      localStorage.setItem("userId", matchedUser.id);
+      localStorage.setItem("role", matchedUser.role);
+      localStorage.setItem("userId", matchedUser.firebaseKey);
 
       dispatch({
         type: "LOGIN_SUCCESS",
         payload: {
           user: matchedUser,
           token: "dummy-token",
-          role: matchedUser.role || user.role,
+          role: matchedUser.role,
+          userId: matchedUser.firebaseKey,
         },
       });
 
@@ -93,7 +122,7 @@ const Login = () => {
       toast.success("Logged in successfully!");
       navigate("/home");
     } catch (err) {
-      console.error("Login error:", err.message);
+      console.error("Login.jsx: Login error:", err.message);
       setError(err.message);
       toast.error(err.message);
     } finally {
@@ -109,6 +138,7 @@ const Login = () => {
         </h3>
 
         <form className="py-4 md:py-0" onSubmit={handleLogin}>
+          {/* Role Selection */}
           <div className="mb-5 text-left">
             <label className="block text-sm font-medium text-headingColor mb-1">
               Your Role

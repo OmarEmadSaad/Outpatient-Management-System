@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { BASE_URL, token } from "../config";
+// Ensure you are importing the correct URLs from your config file
+import { BASE_URL, token, doctor_URL } from "../config";
 import Loading from "../Components/Loader/Loading";
 import Error from "../Components/Error/Error";
 import { toast, ToastContainer } from "react-toastify";
@@ -9,7 +10,8 @@ import "react-toastify/dist/ReactToastify.css";
 const ServicesDetails = () => {
   const [doctors, setDoctors] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [error, setoccasionedError] = useState(null);
+  const [error, setError] = useState(null); // Corrected typo here from setoccasionedError
+
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -18,33 +20,48 @@ const ServicesDetails = () => {
 
   useEffect(() => {
     if (!serviceName) {
-      setError("No service specified.");
+      setError("No service specified in the URL.");
+      setLoading(false); // Make sure to set loading to false if there's an early exit
       return;
     }
 
     const fetchDoctors = async () => {
       setLoading(true);
-      try {
-        const res = await fetch(`${BASE_URL}/doctors`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
+      setError(null); // Clear any previous errors
 
+      try {
+        // Use doctor_URL directly from config, which includes .json
+        // For Firebase Realtime Database, typically you append ?auth=<token> to the URL
+        const authParam = token ? `?auth=${token}` : "";
+        const res = await fetch(`${doctor_URL}${authParam}`); // Use doctor_URL and append auth param
+
+        // Firebase REST API returns 200 even if token is invalid, but data will be null if rules deny access.
+        // It generally doesn't block with CORS if the URL is correct and rules are somewhat open.
+        // If your rules block unauthenticated reads, `res.ok` might still be true but `doctorsData` will be empty.
+        // Or if you get a 401/403, `res.ok` will be false.
         if (!res.ok) {
-          throw new Error("Failed to fetch doctors");
+          const errorText = await res.text();
+          throw new Error(
+            `Failed to fetch doctors: ${res.status} ${res.statusText} - ${errorText}`
+          );
         }
 
-        const doctorsData = await res.json();
+        const doctorsObject = await res.json(); // Firebase returns an object of objects
+
+        // Convert the object of doctors into an array
+        // If doctorsObject is null (e.g., no data or authentication failed), default to an empty object.
+        const allDoctors = doctorsObject ? Object.values(doctorsObject) : [];
 
         const userId = localStorage.getItem("userId");
         const role = localStorage.getItem("role");
 
-        let filteredDoctors = doctorsData.filter(
+        let filteredDoctors = allDoctors.filter(
           (doctor) =>
+            doctor.specialization && // Ensure specialization exists
             doctor.specialization.toLowerCase() === serviceName.toLowerCase()
         );
 
+        // Filter out the current doctor if the logged-in user is a doctor
         if (role === "doctor" && userId) {
           filteredDoctors = filteredDoctors.filter(
             (doctor) => doctor.id !== userId
@@ -54,14 +71,17 @@ const ServicesDetails = () => {
         setDoctors(filteredDoctors);
       } catch (err) {
         console.error("Error fetching doctors:", err);
-        setError(err.message || "Something went wrong. Please try again.");
+        setError(
+          err.message ||
+            "Something went wrong while fetching doctors. Please try again."
+        );
       } finally {
         setLoading(false);
       }
     };
 
     fetchDoctors();
-  }, [serviceName]);
+  }, [serviceName, token]); // Add 'token' to dependencies if it can change and affect the fetch
 
   const handleBooking = (doctorId) => {
     try {

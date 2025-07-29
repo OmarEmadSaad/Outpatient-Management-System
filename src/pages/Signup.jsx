@@ -2,13 +2,16 @@ import SignupImg from "../assets/images/signup.gif";
 import { Link, useNavigate } from "react-router-dom";
 import { useState } from "react";
 import uploadImageToCloudinary from "../utils/uploadCloudinary";
-import { updateUserPhotoInDB } from "../utils/uploadCloudinary";
-import { User_URL, doctor_URL, admin_URL } from "../config";
+import { BASE_URL, token } from "../config";
 import { toast } from "react-toastify";
 import HashLoader from "react-spinners/HashLoader";
 
 const DEFAULT_PHOTO_URL =
   "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcS4Avj4TSMtuTPrA1IqGtlWogrd6D3aZhVwCA98c3NC442QLQU0rmqWv7M&s";
+
+const generateUniqueId = () => {
+  return Math.random().toString(36).substr(2, 4);
+};
 
 const Signup = () => {
   const [selectedFile, setSelectedFile] = useState(null);
@@ -18,18 +21,29 @@ const Signup = () => {
     name: "",
     email: "",
     password: "",
-    photo: DEFAULT_PHOTO_URL, // Set default photo URL
+    photo: DEFAULT_PHOTO_URL,
     gender: "",
-    role: "patient",
+    role: "",
     specialization: "",
+    phone: "",
+    qualifications: [],
+    ticketPrice: 0,
+    timeSlots: [],
+    experiences: [],
   });
   const [errors, setErrors] = useState({
     name: "",
     email: "",
     password: "",
     gender: "",
+    role: "",
     photo: "",
     specialization: "",
+    phone: "",
+    qualifications: "",
+    ticketPrice: "",
+    timeSlots: "",
+    experiences: "",
   });
   const [emailExists, setEmailExists] = useState(false);
 
@@ -38,14 +52,9 @@ const Signup = () => {
 
   const validate = () => {
     let isValid = true;
-    let newErrors = {
-      name: "",
-      email: "",
-      password: "",
-      gender: "",
-      photo: "",
-      specialization: "",
-    };
+    let newErrors = { ...errors };
+
+    Object.keys(newErrors).forEach((key) => (newErrors[key] = ""));
 
     if (!/^[a-zA-Z0-9\s]{3,15}$/.test(formData.name.trim())) {
       newErrors.name =
@@ -71,9 +80,19 @@ const Signup = () => {
       isValid = false;
     }
 
-    if (formData.role === "doctor" && !formData.specialization.trim()) {
-      newErrors.specialization = "Specialization is required for doctors.";
+    if (!formData.role) {
+      newErrors.role = "Please select a role.";
       isValid = false;
+    }
+    if (formData.role === "doctor") {
+      if (formData.phone.trim() && !/^\d{10,15}$/.test(formData.phone.trim())) {
+        newErrors.phone = "Phone number must be 10-15 digits.";
+        isValid = false;
+      }
+      if (formData.ticketPrice && isNaN(Number(formData.ticketPrice))) {
+        newErrors.ticketPrice = "Ticket price must be a number.";
+        isValid = false;
+      }
     }
 
     setErrors(newErrors);
@@ -82,26 +101,37 @@ const Signup = () => {
 
   const checkEmailExists = async (email) => {
     try {
-      const urlToUse =
-        formData.role === "patient"
-          ? User_URL
-          : formData.role === "doctor"
-          ? doctor_URL
-          : admin_URL;
-      const res = await fetch(urlToUse);
+      let urlToUse;
+      if (formData.role === "patient") {
+        urlToUse = `${BASE_URL}/users.json`;
+      } else if (formData.role === "doctor") {
+        urlToUse = `${BASE_URL}/doctors.json`;
+      } else if (formData.role === "admin") {
+        urlToUse = `${BASE_URL}/admins.json`;
+      } else {
+        return false;
+      }
+
+      console.log(`Signup.jsx: Checking email existence at: ${urlToUse}`);
+      const res = await fetch(urlToUse, {});
+
       if (!res.ok) {
+        const errorData = await res.json();
+
         throw new Error(
-          `Failed to fetch ${formData.role} data: ${res.statusText}`
+          `Failed to fetch ${formData.role} data for email check: ${
+            res.statusText || errorData.error
+          }`
         );
       }
       const data = await res.json();
-      const foundUser = data.find(
-        (u) => u.email.toLowerCase() === email.toLowerCase()
+      const foundUser = Object.values(data || {}).find(
+        (u) => u.email && u.email.toLowerCase() === email.toLowerCase()
       );
       setEmailExists(!!foundUser);
       return !!foundUser;
     } catch (error) {
-      console.error("Error checking email:", error);
+      console.error("Signup.jsx: Error checking email:", error);
       toast.error("Error checking email availability. Please try again.");
       return false;
     }
@@ -111,11 +141,12 @@ const Signup = () => {
     const { name, value } = e.target;
     setFormData({ ...formData, [name]: value });
 
+    setErrors((prev) => ({ ...prev, [name]: "" }));
+
     if (name === "email" && value.trim()) {
+      setEmailExists(false);
       checkEmailExists(value);
     }
-
-    setErrors({ ...errors, [name]: "" });
   };
 
   const handleFileInputChange = async (event) => {
@@ -132,19 +163,27 @@ const Signup = () => {
       return;
     }
 
+    setLoading(true);
     try {
+      console.log("Signup.jsx: Uploading image to Cloudinary...");
       const imageUrl = await uploadImageToCloudinary(file);
+      if (!imageUrl) {
+        throw new Error("Cloudinary returned no image URL");
+      }
+      console.log("Signup.jsx: Image uploaded:", imageUrl);
       setPreviewURL(imageUrl);
       setSelectedFile(imageUrl);
       setFormData({ ...formData, photo: imageUrl });
       setErrors({ ...errors, photo: "" });
       toast.success("Photo uploaded successfully");
     } catch (error) {
-      console.error("Error uploading image:", error);
+      console.error("Signup.jsx: Error uploading image:", error);
       toast.error("Failed to upload image. Please try again.");
       setFormData({ ...formData, photo: DEFAULT_PHOTO_URL });
       setPreviewURL(DEFAULT_PHOTO_URL);
       setSelectedFile(null);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -173,27 +212,34 @@ const Signup = () => {
     try {
       let urlToUse;
       let dataToSend = {
+        id: generateUniqueId(),
         name: formData.name.trim(),
         email: formData.email.trim(),
         password: formData.password.trim(),
         photo: formData.photo || DEFAULT_PHOTO_URL,
         gender: formData.gender,
+        role: formData.role,
       };
 
       if (formData.role === "patient") {
-        urlToUse = User_URL;
+        urlToUse = `${BASE_URL}/users.json`;
       } else if (formData.role === "doctor") {
-        urlToUse = doctor_URL;
+        urlToUse = `${BASE_URL}/doctors.json`;
+        dataToSend.phone = formData.phone.trim();
         dataToSend.specialization = formData.specialization.trim();
-        dataToSend.avgRating = 0;
-        dataToSend.totalRating = 0;
-        dataToSend.totalPatients = 0;
-        dataToSend.hospital = "Not specified";
+
+        dataToSend.qualifications = [];
+        dataToSend.experiences = [];
+        dataToSend.timeSlots = [];
+        dataToSend.ticketPrice = Number(formData.ticketPrice) || 0;
       } else if (formData.role === "admin") {
-        urlToUse = admin_URL;
+        urlToUse = `${BASE_URL}/admins.json`;
       } else {
-        throw new Error("Invalid role");
+        throw new Error("Invalid role selected. Please choose a valid role.");
       }
+
+      console.log(`Signup.jsx: Registering ${formData.role} at: ${urlToUse}`);
+      console.log("Signup.jsx: Data to send:", dataToSend);
 
       const res = await fetch(urlToUse, {
         method: "POST",
@@ -204,20 +250,17 @@ const Signup = () => {
       });
 
       const data = await res.json();
-
       if (!res.ok) {
-        throw new Error(data.message || `Failed to register ${formData.role}.`);
+        console.error("Signup.jsx: API response not OK:", data);
+        throw new Error(
+          data.error?.message || `Failed to register ${formData.role}.`
+        );
       }
 
-      localStorage.setItem("userId", data.id);
+      const userIdFromFirebase = data.name;
+
+      localStorage.setItem("userId", userIdFromFirebase);
       localStorage.setItem("role", formData.role);
-
-      await updateUserPhotoInDB(
-        data.id,
-        formData.photo || DEFAULT_PHOTO_URL,
-        formData.role
-      );
-
       setLoading(false);
       toast.success(
         `${
@@ -234,7 +277,7 @@ const Signup = () => {
       );
       navigate("/login");
     } catch (error) {
-      console.error("Signup error:", error);
+      console.error("Signup.jsx: Signup error:", error);
       let errorMessage = "Something went wrong. Please try again.";
       if (error.message.includes("email")) {
         errorMessage = "This email is already registered.";
@@ -329,10 +372,15 @@ const Signup = () => {
                     onChange={handleInputChange}
                     className="text-headingColor text-[15px] font-semibold leading-7 px-4 py-3 focus:outline-none"
                   >
+                    <option value="">Select Role</option>
                     {!isAdmin && <option value="patient">Patient</option>}
                     {isAdmin && <option value="doctor">Doctor</option>}
+                    {isAdmin && <option value="admin">Admin</option>}
                   </select>
                 </label>
+                {errors.role && (
+                  <p className="text-red-500 text-sm mt-1">{errors.role}</p>
+                )}
 
                 <label className="text-headingColor font-bold text-[16px] leading-7">
                   Gender:
@@ -343,31 +391,65 @@ const Signup = () => {
                     className="text-headingColor text-[15px] font-semibold leading-7 px-4 py-3 focus:outline-none"
                   >
                     <option value="">Select</option>
-                    <option value="Male">Male</option>
-                    <option value="Female">Female</option>
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
                   </select>
                 </label>
+                {errors.gender && (
+                  <p className="text-red-500 text-sm mt-1">{errors.gender}</p>
+                )}
               </div>
-              {errors.gender && (
-                <p className="text-red-500 text-sm mt-1">{errors.gender}</p>
-              )}
 
               {formData.role === "doctor" && (
-                <div className="mb-5">
-                  <input
-                    name="specialization"
-                    type="text"
-                    placeholder="Enter your specialization"
-                    value={formData.specialization}
-                    onChange={handleInputChange}
-                    className="w-full px-4 py-3 border-b border-solid border-[#0066ff61] focus:outline-none text-[16px] leading-7 focus:border-b-primaryColor text-headingColor placeholder:text-textColor rounded-md"
-                  />
-                  {errors.specialization && (
-                    <p className="text-red-500 text-sm mt-1">
-                      {errors.specialization}
-                    </p>
-                  )}
-                </div>
+                <>
+                  <div className="mb-5">
+                    <input
+                      name="phone"
+                      type="text"
+                      placeholder="Enter your phone number"
+                      value={formData.phone}
+                      onChange={handleInputChange}
+                      className="w-full px-4 py-3 border-b border-solid border-[#0066ff61] focus:outline-none text-[16px] leading-7 focus:border-b-primaryColor text-headingColor placeholder:text-textColor rounded-md"
+                    />
+                    {errors.phone && (
+                      <p className="text-red-500 text-sm mt-1">
+                        {errors.phone}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="mb-5">
+                    <input
+                      name="specialization"
+                      type="text"
+                      placeholder="Enter your specialization"
+                      value={formData.specialization}
+                      onChange={handleInputChange}
+                      className="w-full px-4 py-3 border-b border-solid border-[#0066ff61] focus:outline-none text-[16px] leading-7 focus:border-b-primaryColor text-headingColor placeholder:text-textColor rounded-md"
+                    />
+                    {errors.specialization && (
+                      <p className="text-red-500 text-sm mt-1">
+                        {errors.specialization}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="mb-5">
+                    <input
+                      name="ticketPrice"
+                      type="number"
+                      placeholder="Enter ticket price"
+                      value={formData.ticketPrice}
+                      onChange={handleInputChange}
+                      className="w-full px-4 py-3 border-b border-solid border-[#0066ff61] focus:outline-none text-[16px] leading-7 focus:border-b-primaryColor text-headingColor placeholder:text-textColor rounded-md"
+                    />
+                    {errors.ticketPrice && (
+                      <p className="text-red-500 text-sm mt-1">
+                        {errors.ticketPrice}
+                      </p>
+                    )}
+                  </div>
+                </>
               )}
 
               <div className="mb-5 gap-3 flex items-center">
@@ -387,14 +469,17 @@ const Signup = () => {
                     name="photo"
                     id="customFile"
                     onChange={handleFileInputChange}
-                    accept=".jpg, .png"
+                    accept=".jpg, .png, image/jpeg, image/png"
                     className="hidden"
+                    disabled={loading}
                   />
                   <label
                     htmlFor="customFile"
-                    className="absolute top-0 left-0 w-full h-full flex items-center px-[0.75rem] py-[0.375rem] text-[15px] leading-6 overflow-hidden text-headingColor bg-[#0066ff46] font-semibold rounded-lg truncate cursor-pointer"
+                    className={`absolute top-0 left-0 w-full h-full flex items-center px-[0.75rem] py-[0.375rem] text-[15px] leading-6 overflow-hidden text-headingColor bg-[#0066ff46] font-semibold rounded-lg truncate cursor-pointer ${
+                      loading ? "opacity-50 cursor-not-allowed" : ""
+                    }`}
                   >
-                    Upload Photo
+                    {loading ? "Uploading..." : "Upload Photo"}
                   </label>
                 </div>
               </div>

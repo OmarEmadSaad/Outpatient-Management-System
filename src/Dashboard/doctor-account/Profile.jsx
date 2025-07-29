@@ -8,8 +8,7 @@ import uploadImageToCloudinary from "../../utils/uploadCloudinary";
 import { toast } from "react-toastify";
 import { authContext } from "../../context/AuthContext";
 import HashLoader from "react-spinners/HashLoader";
-import { doctor_URL, service_URL, token } from "../../config";
-
+import { doctor_URL, service_URL } from "../../config";
 const Profile = () => {
   const { user, userId, role } = useContext(authContext);
   const [selectedFile, setSelectedFile] = useState(null);
@@ -41,23 +40,29 @@ const Profile = () => {
   useEffect(() => {
     const fetchServices = async () => {
       try {
-        const res = await fetch(service_URL, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-        if (!res.ok) throw new Error("Failed to fetch services");
-        const data = await res.json();
-        setServices(data);
+        const firebaseIdToken = user?.token;
+
+        const authParam = firebaseIdToken ? `?auth=${firebaseIdToken}` : "";
+
+        const res = await fetch(`${service_URL}${authParam}`);
+
+        if (!res.ok) {
+          const errorData = await res.json();
+          throw new Error(errorData.error || "Failed to fetch services");
+        }
+        const servicesData = await res.json();
+        const servicesArray = servicesData ? Object.values(servicesData) : [];
+        setServices(servicesArray);
       } catch (error) {
         console.error("Error fetching services:", error);
         toast.error("Failed to load services: " + error.message);
       }
     };
 
-    fetchServices();
-  }, []);
-
+    if (user) {
+      fetchServices();
+    }
+  }, [user]);
   useEffect(() => {
     const fetchDoctorData = async () => {
       if (!userId || !role || role !== "doctor") {
@@ -66,26 +71,32 @@ const Profile = () => {
         return;
       }
 
+      setIsLoading(true);
       try {
-        const res = await fetch(doctor_URL, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-        const doctorsData = await res.json();
+        const firebaseIdToken = user?.token;
+
+        const authParam = firebaseIdToken ? `?auth=${firebaseIdToken}` : "";
+
+        const res = await fetch(`${doctor_URL}${authParam}`);
+
         if (!res.ok) {
-          throw new Error("Failed to fetch doctor data");
+          const errorData = await res.json();
+          throw new Error(errorData.error || "Failed to fetch doctor data");
         }
 
-        const doctor = doctorsData.find((doc) => doc.id === userId);
+        const doctorsObject = await res.json();
+        const allDoctors = doctorsObject ? Object.values(doctorsObject) : [];
+
+        const doctor = allDoctors.find((doc) => doc.id === userId);
+
         if (!doctor) {
-          throw new Error("Doctor not found");
+          throw new Error("Doctor not found for the current user.");
         }
 
         setFormData({
           name: doctor.name || "",
           email: doctor.email || "",
-          password: doctor.password || "",
+          password: "",
           phone: doctor.phone || "",
           bio: doctor.bio || "",
           gender: doctor.gender || "",
@@ -126,8 +137,12 @@ const Profile = () => {
       }
     };
 
-    fetchDoctorData();
-  }, [userId, role]);
+    if (user && userId && role === "doctor") {
+      fetchDoctorData();
+    } else if (!user) {
+      setIsLoading(false);
+    }
+  }, [userId, role, user]);
 
   const handleInputChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -147,6 +162,7 @@ const Profile = () => {
     setSelectedFile(file);
 
     try {
+      setLoading(true);
       const imageUrl = await uploadImageToCloudinary(file);
       setFormData({ ...formData, photo: imageUrl });
       toast.success("Photo uploaded successfully");
@@ -154,6 +170,8 @@ const Profile = () => {
       toast.error("Failed to upload photo: " + error.message);
       setPreviewURL(formData.photo || "");
       setSelectedFile(null);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -183,10 +201,13 @@ const Profile = () => {
     }
 
     try {
+      const firebaseIdToken = user?.token;
+      const authParam = firebaseIdToken ? `?auth=${firebaseIdToken}` : "";
+
       const updatedData = {
         name: formData.name,
         email: formData.email,
-        password: formData.password || undefined, // Don't update password if empty
+        ...(formData.password && { password: formData.password }),
         phone: formData.phone,
         bio: formData.bio,
         gender: formData.gender,
@@ -199,21 +220,22 @@ const Profile = () => {
         timeSlots: formData.timeSlots,
       };
 
-      const res = await fetch(`${doctor_URL}/${userId}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(updatedData),
-      });
+      const res = await fetch(
+        `${doctor_URL.replace(".json", "")}/${userId}.json${authParam}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(updatedData),
+        }
+      );
 
       if (!res.ok) {
         const errorData = await res.json();
-        throw new Error(errorData.message || "Failed to update profile");
+        throw new Error(errorData.error || "Failed to update profile");
       }
 
-      const updatedDoctor = await res.json();
       toast.success("Profile updated successfully");
     } catch (error) {
       toast.error(error.message || "Failed to update profile");
@@ -312,16 +334,24 @@ const Profile = () => {
     setShowPassword(!showPassword);
   };
 
-  if (!userId || role !== "doctor") {
-    return <div>Please log in as a doctor to view your profile.</div>;
+  if (!user || !userId || role !== "doctor") {
+    return (
+      <div className="container mx-auto px-4 py-10 text-center text-lg text-red-500">
+        Please log in as a doctor to view and edit your profile.
+      </div>
+    );
   }
 
   if (isLoading) {
-    return <div>Loading profile data...</div>;
+    return (
+      <div className="flex items-center justify-center w-full h-[50vh]">
+        <HashLoader size={50} color="#0066ff" />
+      </div>
+    );
   }
 
   return (
-    <div className="container mx-auto px-4">
+    <div className="container mx-auto px-4 py-10">
       <h2 className="text-headingColor mb-6 leading-9 font-bold text-[18px] sm:text-[24px]">
         Profile Information for <span className="text-blue-500">{role}</span>
       </h2>

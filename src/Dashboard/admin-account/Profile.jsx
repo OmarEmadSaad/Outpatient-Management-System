@@ -3,10 +3,11 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 import HashLoader from "react-spinners/HashLoader";
 import { authContext } from "../../context/AuthContext";
-import { BASE_URL } from "../../config";
+import { ref, get, child } from "firebase/database";
+import { db } from "../../../firebase/config";
 
 const Profile = () => {
-  const { userId, role, token: authToken } = useContext(authContext);
+  const { userId, role } = useContext(authContext);
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
@@ -32,58 +33,72 @@ const Profile = () => {
 
       setLoading(true);
       try {
-        const usersRes = await fetch(`${BASE_URL}/users`, {
-          headers: { Authorization: `Bearer ${authToken}` },
-        });
-        if (!usersRes.ok) {
-          const errorText = await usersRes.text();
-          throw new Error(errorText || "Failed to fetch users");
+        const dbRef = ref(db);
+        const usersSnapshot = await get(child(dbRef, "users"));
+        const usersData = [];
+        if (usersSnapshot.exists()) {
+          usersSnapshot.forEach((childSnapshot) => {
+            usersData.push({ id: childSnapshot.key, ...childSnapshot.val() });
+          });
         }
-        const usersData = await usersRes.json();
         const patients = usersData.filter(
           (user) => user.role === "patient" || !user.role
         );
 
-        const doctorsRes = await fetch(`${BASE_URL}/doctors`, {
-          headers: { Authorization: `Bearer ${authToken}` },
-        });
-        if (!doctorsRes.ok) {
-          const errorText = await doctorsRes.text();
-          throw new Error(errorText || "Failed to fetch doctors");
+        const doctorsSnapshot = await get(child(dbRef, "doctors"));
+        const doctorsData = [];
+        if (doctorsSnapshot.exists()) {
+          doctorsSnapshot.forEach((childSnapshot) => {
+            doctorsData.push({ id: childSnapshot.key, ...childSnapshot.val() });
+          });
         }
-        const doctorsData = await doctorsRes.json();
 
-        const servicesRes = await fetch(`${BASE_URL}/services`, {
-          headers: { Authorization: `Bearer ${authToken}` },
-        });
-        if (!servicesRes.ok) {
-          const errorText = await servicesRes.text();
-          throw new Error(errorText || "Failed to fetch services");
+        const servicesSnapshot = await get(child(dbRef, "services"));
+        const servicesData = [];
+        if (servicesSnapshot.exists()) {
+          servicesSnapshot.forEach((childSnapshot) => {
+            servicesData.push({
+              id: childSnapshot.key,
+              ...childSnapshot.val(),
+            });
+          });
         }
-        const servicesData = await servicesRes.json();
-        const lastService = servicesData[servicesData.length - 1];
+        const lastService =
+          servicesData.length > 0
+            ? servicesData[servicesData.length - 1]
+            : null;
 
-        const appointmentsRes = await fetch(`${BASE_URL}/appointments`, {
-          headers: { Authorization: `Bearer ${authToken}` },
-        });
-        if (!appointmentsRes.ok) {
-          const errorText = await appointmentsRes.text();
-          throw new Error(errorText || "Failed to fetch appointments");
+        const appointmentsSnapshot = await get(child(dbRef, "appointments"));
+        const appointmentsData = [];
+        if (appointmentsSnapshot.exists()) {
+          appointmentsSnapshot.forEach((childSnapshot) => {
+            appointmentsData.push({
+              id: childSnapshot.key,
+              ...childSnapshot.val(),
+            });
+          });
         }
-        const appointmentsData = await appointmentsRes.json();
-        const lastAppointment = appointmentsData.reduce(
-          (latest, appt) =>
-            !latest || (appt.createdAt && appt.createdAt > latest.createdAt)
-              ? appt
-              : latest,
-          null
-        );
+        const lastAppointment = appointmentsData.reduce((latest, appt) => {
+          const currentCreatedAt = appt.createdAt
+            ? new Date(appt.createdAt)
+            : null;
+          const latestCreatedAt = latest?.createdAt
+            ? new Date(latest.createdAt)
+            : null;
+
+          return currentCreatedAt &&
+            (!latestCreatedAt || currentCreatedAt > latestCreatedAt)
+            ? appt
+            : latest;
+        }, null);
 
         const lastActiveUser = lastAppointment
-          ? patients.find((user) => user.id === lastAppointment.user.id)
+          ? patients.find((user) => user.id === lastAppointment.user?.id)
           : null;
-        const lastActiveDoctor = lastAppointment
-          ? doctorsData.find((doctor) => doctor.id === lastAppointment.doctorId)
+        const lastActiveDoctor = lastAppointment?.doctor?.doctorId
+          ? doctorsData.find(
+              (doctor) => doctor.id === lastAppointment.doctor.doctorId
+            )
           : null;
 
         setStats({
@@ -101,7 +116,7 @@ const Profile = () => {
           },
           services: {
             total: servicesData.length,
-            lastService,
+            lastService: lastService,
           },
           appointments: {
             total: appointmentsData.length,
@@ -117,7 +132,7 @@ const Profile = () => {
     };
 
     fetchStats();
-  }, [userId, role, authToken, navigate]);
+  }, [userId, role, navigate]);
 
   return (
     <div className="container mx-auto px-4 py-10">
@@ -206,19 +221,13 @@ const Profile = () => {
             <p className="text-lg text-textColor">
               Last Added:
               <span className="font-semibold">
-                {stats.services.lastService ? (
-                  <>
-                    {stats.services.lastService.name} (
-                    {stats.services.lastService.createdAt
-                      ? new Date(
-                          stats.services.lastService.createdAt
-                        ).toLocaleString()
-                      : "N/A"}
-                    )
-                  </>
-                ) : (
-                  "N/A"
-                )}
+                {stats.services.lastService?.name} (
+                {stats.services.lastService?.createdAt
+                  ? new Date(
+                      stats.services.lastService.createdAt
+                    ).toLocaleString()
+                  : "N/A"}
+                )
               </span>
             </p>
             <button
