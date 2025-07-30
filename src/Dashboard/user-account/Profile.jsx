@@ -37,41 +37,10 @@ const Profile = () => {
 
       try {
         const db = getDatabase();
-        const usersRef = ref(db, `users`);
-        const usersSnapshot = await get(usersRef);
+        const userRef = ref(db, `users/${userId}`);
+        const userSnapshot = await get(userRef);
 
-        if (!usersSnapshot.exists()) {
-          console.warn("Users data node not found in Firebase.");
-          toast.warn("User data not found. Please contact support.");
-          setFormData({
-            name: "Unknown User",
-            email: "no-email@example.com",
-            password: "",
-            photo: null,
-            gender: "",
-            bloodType: "",
-            phoneNumber: "",
-          });
-          setPreviewURL("");
-          return;
-        }
-
-        const allUsersData = usersSnapshot.val();
-        let foundUser = null;
-        let foundFirebaseKey = null;
-
-        for (const key in allUsersData) {
-          if (allUsersData.hasOwnProperty(key)) {
-            const currentUserData = allUsersData[key];
-            if (currentUserData.id === userId) {
-              foundUser = currentUserData;
-              foundFirebaseKey = key;
-              break;
-            }
-          }
-        }
-
-        if (!foundUser) {
+        if (!userSnapshot.exists()) {
           console.warn("User data not found for userId:", userId);
           toast.warn("User data not found. Please contact support.");
           setFormData({
@@ -87,6 +56,7 @@ const Profile = () => {
           return;
         }
 
+        const foundUser = userSnapshot.val();
         setFormData({
           name: foundUser.name || "",
           email: foundUser.email || "",
@@ -97,7 +67,7 @@ const Profile = () => {
           phoneNumber: foundUser.phoneNumber || "",
         });
         setPreviewURL(foundUser.photo || "");
-        setFirebaseKey(foundFirebaseKey);
+        setFirebaseKey(userId); // Set firebaseKey to userId
       } catch (error) {
         console.error("Error fetching patient data:", error);
         toast.error(

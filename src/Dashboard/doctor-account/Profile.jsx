@@ -74,20 +74,19 @@ const Profile = () => {
       setIsLoading(true);
       try {
         const firebaseIdToken = user?.token;
-
         const authParam = firebaseIdToken ? `?auth=${firebaseIdToken}` : "";
 
-        const res = await fetch(`${doctor_URL}${authParam}`);
+        // Query the doctor directly using the Firebase key (userId)
+        const res = await fetch(
+          `${doctor_URL.replace(".json", "")}/${userId}.json${authParam}`
+        );
 
         if (!res.ok) {
           const errorData = await res.json();
           throw new Error(errorData.error || "Failed to fetch doctor data");
         }
 
-        const doctorsObject = await res.json();
-        const allDoctors = doctorsObject ? Object.values(doctorsObject) : [];
-
-        const doctor = allDoctors.find((doc) => doc.id === userId);
+        const doctor = await res.json();
 
         if (!doctor) {
           throw new Error("Doctor not found for the current user.");
@@ -143,7 +142,6 @@ const Profile = () => {
       setIsLoading(false);
     }
   }, [userId, role, user]);
-
   const handleInputChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
