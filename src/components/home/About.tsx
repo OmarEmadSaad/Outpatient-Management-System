@@ -2,7 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import aboutImg from "@/assets/images/about.png";
 import aboutCardImg from "@/assets/images/about-card.png";
-import { Button } from "@material-tailwind/react";
+import { infoButtonClass } from "@/components/ui/buttonClasses";
 
 export default function About() {
   return (
@@ -27,9 +27,9 @@ export default function About() {
               we can do tomorrow .providing the best services
             </p>
             <Link href="/">
-              <Button as="span" color="info">
+              <span className={infoButtonClass()} data-shape="default" data-width="default">
                 Learn more
-              </Button>
+              </span>
             </Link>
           </div>
         </div>

@@ -5,7 +5,7 @@ import heroBg from "@/assets/images/hero-bg.webp";
 import heroImg01 from "@/assets/images/hero-img01.png";
 import heroImg02 from "@/assets/images/hero-img02.png";
 import heroImg03 from "@/assets/images/hero-img03.png";
-import { Button } from "@material-tailwind/react";
+import { infoButtonClass } from "@/components/ui/buttonClasses";
 
 const stats = [
   { number: "30+", label: "Years of experience", color: "bg-yellow-400" },
@@ -34,9 +34,9 @@ export default function HeroSection() {
                 medical services.
               </p>
               <Link href="/doctors" className="inline-block mt-4">
-                <Button as="span" color="info" size="sm">
+                <span className={infoButtonClass("sm")} data-shape="default" data-width="default">
                   Request an Appointment
-                </Button>
+                </span>
               </Link>
             </div>
 

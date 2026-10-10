@@ -1,7 +1,9 @@
 "use client";
 
 import "./globals.css";
-import ErrorState from "@/components/ui/ErrorState";
+import dynamic from "next/dynamic";
+
+const ErrorState = dynamic(() => import("@/components/ui/ErrorState"));
 
 export default function GlobalError({
   error,

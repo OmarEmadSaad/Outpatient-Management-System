@@ -3,7 +3,7 @@ import Link from "next/link";
 import featureImg from "@/assets/images/feature-img.png";
 import videoImg from "@/assets/images/video-icon.png";
 import avatarIcon from "@/assets/images/avatar-icon.png";
-import { Button } from "@material-tailwind/react";
+import { infoButtonClass } from "@/components/ui/buttonClasses";
 
 export default function VirtualTreatment() {
   return (
@@ -24,9 +24,9 @@ export default function VirtualTreatment() {
               </li>
             </ul>
             <Link href="/">
-              <Button as="span" color="info" className="mt-6">
+              <span className={`${infoButtonClass()} mt-6`} data-shape="default" data-width="default">
                 Learn more
-              </Button>
+              </span>
             </Link>
           </div>
           <div className=" relative z-10 xl:w-[770px] flex justify-end mt-[50px] lg:mt-0">
