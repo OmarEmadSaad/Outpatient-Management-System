@@ -1,0 +1,54 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "users": {
+      ".indexOn": [
+        "email",
+        "id"
+      ]
+    },
+    "doctors": {
+      ".indexOn": [
+        "email",
+        "id",
+        "specialization"
+      ]
+    },
+    "admin": {
+      ".indexOn": [
+        "email"
+      ]
+    },
+    "admins": {
+      ".indexOn": [
+        "email"
+      ]
+    },
+    "appointments": {
+      ".indexOn": [
+        "doctorId",
+        "user/id",
+        "createdAt"
+      ]
+    },
+    "reviews": {
+      ".indexOn": [
+        "doctorId",
+        "userId"
+      ]
+    },
+    "services": {
+      ".indexOn": [
+        "id"
+      ]
+    },
+    "rateLimits": {
+      ".indexOn": [
+        "resetAt"
+      ]
+    },
+    "authLinks": {},
+    "appointmentQueues": {}
+  }
+}
